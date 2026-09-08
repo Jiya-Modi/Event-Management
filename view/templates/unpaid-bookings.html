@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+    <title>Booking Not Confirmed</title>
+
+    <style>
+      body {
+        margin: 0;
+        padding: 0;
+        background-color: #f4f6f8;
+        font-family: Arial, Helvetica, sans-serif;
+        color: #333333;
+      }
+
+      .container {
+        max-width: 600px;
+        margin: 40px auto;
+        background-color: #ffffff;
+        border-radius: 10px;
+        overflow: hidden;
+      }
+
+      .header {
+        background-color: #7e57c2;
+        color: #ffffff;
+        padding: 30px;
+        text-align: center;
+      }
+
+      .header h1 {
+        margin: 0;
+        font-size: 25px;
+      }
+
+      .content {
+        padding: 30px;
+      }
+
+      .content p {
+        font-size: 15px;
+        line-height: 1.6;
+      }
+
+      .event-card {
+        margin: 25px 0;
+        padding: 20px;
+        background-color: #f8f7fc;
+        border-left: 4px solid #7e57c2;
+        border-radius: 6px;
+      }
+
+      .event-title {
+        margin: 0 0 15px;
+        font-size: 21px;
+        color: #7e57c2;
+      }
+
+      .event-detail {
+        margin: 8px 0;
+        font-size: 14px;
+      }
+
+      .label {
+        font-weight: bold;
+        color: #444444;
+      }
+
+      .warning {
+        margin: 20px 0;
+        padding: 16px;
+        background-color: #fff4e5;
+        border-radius: 6px;
+        color: #8a5a00;
+        font-size: 14px;
+        line-height: 1.6;
+      }
+
+      .footer {
+        padding: 20px;
+        text-align: center;
+        background-color: #f4f6f8;
+        color: #777777;
+        font-size: 12px;
+      }
+    </style>
+  </head>
+
+  <body>
+    <div class="container">
+      <div class="header">
+        <h1>Booking Not Confirmed</h1>
+      </div>
+
+      <div class="content">
+        <p>Hello {{user_name}},</p>
+
+        <p>
+          We would like to inform you that your booking for the following event
+          has not been confirmed because the payment was not completed.
+        </p>
+
+        <div class="event-card">
+          <h2 class="event-title">{{event_title}}</h2>
+
+          <p class="event-detail">
+            <span class="label">Date:</span>
+            {{event_date}}
+          </p>
+
+          <p class="event-detail">
+            <span class="label">Location:</span>
+            {{event_address}}, {{event_city}}
+          </p>
+        </div>
+
+        <div class="warning">
+          <strong>Your registration is not confirmed.</strong><br />
+          Since the payment was not completed, you will not be able to attend
+          this event. Your seat has not been confirmed.
+        </div>
+
+        <p>
+          If you have any questions regarding your booking, please contact the
+          event organizer.
+        </p>
+
+        <p>Thank you for your interest in the event.</p>
+
+        <p>
+          Regards,<br />
+          <strong>Event Management Team</strong>
+        </p>
+      </div>
+
+      <div class="footer">
+        This is an automated email. Please do not reply to this email.
+      </div>
+    </div>
+  </body>
+</html>

@@ -1,0 +1,241 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Event Feedback Form</title>
+  </head>
+  <body
+    style="
+      margin: 0;
+      padding: 0;
+      background-color: #f4f6f8;
+      font-family: Arial, Helvetica, sans-serif;
+      color: #333333;
+      -webkit-font-smoothing: antialiased;
+    "
+  >
+    <div
+      class="container"
+      style="
+        max-width: 600px;
+        margin: 40px auto;
+        background-color: #ffffff;
+        border-radius: 10px;
+        overflow: hidden;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
+        border: 1px solid #e1e4e8;
+      "
+    >
+      <div
+        class="header"
+        style="
+          background-color: #7e57c2;
+          color: #ffffff;
+          padding: 30px;
+          text-align: center;
+        "
+      >
+        <h1 style="margin: 0; font-size: 26px; font-weight: 700">
+          We'd Love Your Feedback!
+        </h1>
+      </div>
+
+      <div class="content" style="padding: 30px">
+        <p style="font-size: 15px; line-height: 1.6; margin-top: 0">
+          Hello {{user_name}},
+        </p>
+        <p style="font-size: 15px; line-height: 1.6">
+          Thank you for attending our event. We hope you had a great experience!
+        </p>
+
+        <div
+          class="event-card"
+          style="
+            margin: 25px 0;
+            padding: 20px;
+            background-color: #f8f7fc;
+            border-left: 4px solid #7e57c2;
+            border-radius: 6px;
+          "
+        >
+          <h2
+            class="event-title"
+            style="margin: 0; font-size: 21px; color: #7e57c2; font-weight: 600"
+          >
+            {{event_title}}
+          </h2>
+        </div>
+
+        <form
+          action="http://localhost:3000/api/v1/user/feedback?eventId={{event_id}}"
+          method="POST"
+        >
+          <!-- Hidden inputs securely map the form back to Node.js backend parameters -->
+
+          <!-- Fixed Email Input Group -->
+          <div class="form-group" style="margin-bottom: 20px">
+            <label
+              for="email"
+              class="form-label"
+              style="
+                display: block;
+                font-weight: bold;
+                margin-bottom: 8px;
+                font-size: 14px;
+                color: #444444;
+              "
+              >Your Email Address:</label
+            >
+            <input
+              type="email"
+              id="email"
+              name="email"
+              class="form-input-text"
+              placeholder="abc@example.com"
+              required
+              style="
+                width: 100%;
+                box-sizing: border-box;
+                padding: 12px;
+                border: 1px solid #cccccc;
+                border-radius: 6px;
+                font-size: 14px;
+                font-family: inherit;
+              "
+            />
+          </div>
+
+          <!-- Fixed Rating Entry Group -->
+          <div class="form-group" style="margin-bottom: 20px">
+            <label
+              for="rating"
+              class="form-label"
+              style="
+                display: block;
+                font-weight: bold;
+                margin-bottom: 8px;
+                font-size: 14px;
+                color: #444444;
+              "
+              >Rating (1 to 5):</label
+            >
+            <input
+              id="rating"
+              name="rating"
+              min="1"
+              max="5"
+              class="form-input-number"
+              placeholder="5"
+              required
+              style="
+                width: 80px;
+                box-sizing: border-box;
+                padding: 10px;
+                border: 1px solid #cccccc;
+                border-radius: 6px;
+                font-size: 16px;
+                font-family: inherit;
+                text-align: center;
+              "
+            />
+          </div>
+
+          <!-- Comments Area Group -->
+          <div class="form-group" style="margin-bottom: 25px">
+            <label
+              for="comment"
+              class="form-label"
+              style="
+                display: block;
+                font-weight: bold;
+                margin-bottom: 8px;
+                font-size: 14px;
+                color: #444444;
+              "
+              >Your Comments:</label
+            >
+            <textarea
+              id="comment"
+              name="comment"
+              class="form-textarea"
+              placeholder="Tell us what you liked or what we can improve..."
+              required
+              style="
+                width: 100%;
+                box-sizing: border-box;
+                padding: 12px;
+                border: 1px solid #cccccc;
+                border-radius: 6px;
+                font-family: inherit;
+                font-size: 14px;
+                resize: vertical;
+                min-height: 100px;
+              "
+            ></textarea>
+          </div>
+
+          <!-- Button Container -->
+          <div
+            class="button-container"
+            style="text-align: center; margin: 30px 0"
+          >
+            <button
+              type="submit"
+              class="submit-button"
+              style="
+                display: block;
+                width: 100%;
+                padding: 14px 28px;
+                background-color: #7e57c2;
+                color: #ffffff;
+                border: none;
+                border-radius: 6px;
+                font-size: 16px;
+                font-weight: bold;
+                cursor: pointer;
+                transition: background-color 0.2s;
+              "
+            >
+              Submit Feedback
+            </button>
+          </div>
+        </form>
+
+        <p
+          class="note"
+          style="
+            font-size: 13px;
+            color: #777777;
+            line-height: 1.5;
+            margin-top: 25px;
+          "
+        >
+          It will only take a few minutes to complete the feedback form. We
+          truly appreciate your time and feedback.
+        </p>
+        <p style="font-size: 15px; line-height: 1.6">
+          Thank you for being a part of our event!
+        </p>
+        <p style="font-size: 15px; line-height: 1.6; margin-bottom: 0">
+          Regards,<br /><strong>Event Management Team</strong>
+        </p>
+      </div>
+
+      <div
+        class="footer"
+        style="
+          padding: 20px;
+          text-align: center;
+          background-color: #f4f6f8;
+          color: #777777;
+          font-size: 12px;
+          border-top: 1px solid #e1e4e8;
+        "
+      >
+        This is an automated system form. Please review your entries before
+        submitting.
+      </div>
+    </div>
+  </body>
+</html>

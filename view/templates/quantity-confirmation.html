@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+    <title>Registration Confirmed</title>
+
+    <style>
+      body {
+        margin: 0;
+        padding: 0;
+        background-color: #f4f6f8;
+        font-family: Arial, Helvetica, sans-serif;
+        color: #333333;
+      }
+
+      .email-wrapper {
+        width: 100%;
+        padding: 40px 0;
+      }
+
+      .email-container {
+        width: 90%;
+        max-width: 600px;
+        margin: 0 auto;
+        background-color: #ffffff;
+        border-radius: 10px;
+        overflow: hidden;
+        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08);
+      }
+
+      .header {
+        background-color: #7e57c2;
+        padding: 30px 20px;
+        text-align: center;
+        color: #ffffff;
+      }
+
+      .header h1 {
+        margin: 0;
+        font-size: 26px;
+      }
+
+      .content {
+        padding: 30px;
+      }
+
+      .content h2 {
+        margin-top: 0;
+        color: #222222;
+      }
+
+      .content p {
+        font-size: 15px;
+        line-height: 1.6;
+        margin: 12px 0;
+      }
+
+      .event-details {
+        margin: 25px 0;
+        padding: 20px;
+        background-color: #f8f9fa;
+        border-radius: 8px;
+        border-left: 4px solid #7e57c2;
+      }
+
+      .event-details p {
+        margin: 8px 0;
+      }
+
+      .label {
+        font-weight: bold;
+        color: #555555;
+      }
+
+      .success-message {
+        padding: 15px;
+        margin: 20px 0;
+        background-color: #e8f5e9;
+        border-radius: 6px;
+        color: #7e57c2;
+        font-weight: 600;
+      }
+
+      .footer {
+        padding: 20px 30px;
+        text-align: center;
+        background-color: #f8f9fa;
+        color: #777777;
+        font-size: 13px;
+      }
+
+      @media only screen and (max-width: 600px) {
+        .content {
+          padding: 20px;
+        }
+
+        .header h1 {
+          font-size: 22px;
+        }
+      }
+    </style>
+  </head>
+
+  <body>
+    <div class="email-wrapper">
+      <div class="email-container">
+        <div class="header">
+          <h1>Registration Confirmed!</h1>
+        </div>
+
+        <div class="content">
+          <h2>Hello {{user_name}},</h2>
+
+          <p>
+            Great news! A spot has become available for the event
+            <strong>{{event_title}}</strong>.
+          </p>
+
+          <div class="success-message">
+            Your waitlist registration for quantity {{quantity}} has been
+            successfully promoted. You are now confirmed for the event.
+          </div>
+
+          <div class="event-details">
+            <p>
+              <span class="label">Event:</span>
+              {{event_title}}
+            </p>
+
+            <p>
+              <span class="label">Date:</span>
+              {{event_date}}
+            </p>
+
+            <p>
+              <span class="label">Address:</span>
+              {{event_address}}
+            </p>
+
+            <p>
+              <span class="label">City:</span>
+              {{event_city}}
+            </p>
+          </div>
+
+          <p>
+            Your all tickets are not confirmed. Remaining {{refund_amount}} will
+            be refunded in 5 working days. Registration status for {{quantity}}
+            is only
+            <strong>Confirmed</strong>.
+          </p>
+
+          <p>
+            Registration id for the quantity is
+            <strong>{{registration_id}}</strong>.
+          </p>
+
+          <p>Please find the attached ticket</p>
+
+          <p>We look forward to seeing you at the event!</p>
+
+          <p>
+            Thank you,<br />
+            <strong> Event Management System </strong>
+          </p>
+        </div>
+
+        <div class="footer">
+          <p>This is an automated email. Please do not reply to this email.</p>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>
