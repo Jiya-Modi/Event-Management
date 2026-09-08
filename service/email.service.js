@@ -134,9 +134,7 @@ const sendRegistrationCancellationMail = async (user, registration) => {
   });
 };
 
-const sendEventCancellationMail = async (emails, event) => {
-  const userEmails = emails.map((item) => item.email);
-
+const sendEventCancellationMail = async (email, event) => {
   const templatePath = path.join(
     __dirname,
     '../view/templates/event-cancellation.html',
@@ -153,7 +151,7 @@ const sendEventCancellationMail = async (emails, event) => {
 
   await transporter.sendMail({
     from: process.env.MAIL_FROM,
-    to: userEmails,
+    to: email,
     subject: `Event Cancellation - ${event.title}`,
     html,
   });

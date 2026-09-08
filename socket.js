@@ -88,3 +88,8 @@ module.exports = {
   initializeSocket,
   getIO,
 };
+
+//Temporary Disconnection
+// const io = new Server(server, {
+//   connectionStateRecovery: { maxDisconnectionDuration: 2 * 60 * 1000 },
+// });

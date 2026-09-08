@@ -3,6 +3,8 @@ const sequelize = require('../config/db');
 const fs = require('fs/promises');
 const path = require('path');
 
+const emailQueue = require('../queues/emailQueue');
+
 const {
   User,
   Event,
@@ -891,7 +893,16 @@ const destroyEvent = async (userId, query) => {
     await transaction.commit();
 
     if (emails.length > 0) {
-      await sendEventCancellationMail(emails, event);
+      for (const user of emails) {
+        emailQueue.add(
+          async () => {
+            await sendEventCancellationMail([user], event);
+          },
+          {
+            attempts: 3,
+          },
+        );
+      }
     }
 
     if (userIds.length > 0) {
@@ -1657,3 +1668,28 @@ module.exports = {
   uploadReplaceEventBannerFile,
   deleteEventBannerFile,
 };
+
+// Event Service
+//      │
+//      │ Responsible for:
+//      │ - Cancel event
+//      │ - Find users
+//      │ - Add email jobs
+//      │
+//      ▼
+// Email Queue
+//      │
+//      │ Responsible for:
+//      │ - Store jobs
+//      │ - Process jobs
+//      │ - Retry failed jobs
+//      │ - Ensure one job at a time
+//      │
+//      ▼
+// Email Service
+//      │
+//      │ Responsible for:
+//      │ - Actually send email
+//      │
+//      ▼
+// SMTP / Brevo / etc.
