@@ -3,7 +3,9 @@ const sequelize = require('../config/db');
 const fs = require('fs/promises');
 const path = require('path');
 
-const emailQueue = require('../queues/emailQueue');
+//const emailQueue = require('../queues/emailQueue');
+
+const emailQueue = require('../queues/bullmq.emailQueue');
 
 const {
   User,
@@ -597,6 +599,8 @@ const destroyEvent = async (userId, query) => {
 
     let registrations = [];
 
+    let userEmails = [];
+
     const allowedRegistrationStatus = [
       REGISTRATION_STATUS.REGISTERED,
       REGISTRATION_STATUS.PARTIAL_CONFIRM,
@@ -636,14 +640,24 @@ const destroyEvent = async (userId, query) => {
           email: registration.user.email,
         }));
 
+      console.log(emails);
+
+      userEmails = [...new Set(emails.map((item) => item.email))];
+
+      console.log(userEmails);
+
       userIds = [
         ...new Set(registrations.map((registration) => registration.user_id)),
       ];
     }
 
+    console.log(userIds);
+
     const registrationIds = registrations.map(
       (registration) => registration.id,
     );
+
+    console.log(registrationIds);
 
     let partialRegistrations = [];
 
@@ -892,14 +906,19 @@ const destroyEvent = async (userId, query) => {
 
     await transaction.commit();
 
-    if (emails.length > 0) {
-      for (const user of emails) {
-        emailQueue.add(
-          async () => {
-            await sendEventCancellationMail([user], event);
-          },
+    if (userEmails.length > 0) {
+      for (const user of userEmails) {
+        await emailQueue.add(
+          // async () => {
+          //   await sendEventCancellationMail(user, event);
+          // },
+          // {
+          //   attempts: 3,
+          // },
+          'event-cancellation-email',
           {
-            attempts: 3,
+            user,
+            event,
           },
         );
       }
@@ -1509,7 +1528,6 @@ const editProfileDetails = async (userId, body) => {
     throw err;
   }
 };
-
 const uploadReplaceEventBannerFile = async (
   userId,
   event,

@@ -45,6 +45,8 @@ const { generateQRCode } = require('../utils/qrGenerator');
 const { generateTicketPDF } = require('../utils/ticketPdf');
 const { sendNotification } = require('../service/fcm.service');
 
+const reminderQueue = require('../queues/bullmq.reminderQueue');
+
 const executeEventReminder = async (scheduler) => {
   try {
     console.log('>>>>>Event ID:', scheduler.event_id);
@@ -92,14 +94,36 @@ const executeEventReminder = async (scheduler) => {
       email: registration.user.email,
     }));
 
+    console.log(emails);
+
+    const userEmails = [...new Set(emails.map((item) => item.email))];
+
+    console.log(userEmails);
+
     const userIds = registeredUsers.map((registration) => registration.user_id);
 
-    if (emails.length == 0) {
+    if (userEmails.length == 0) {
       const error = new Error('No user to send reminder');
       throw error;
     }
 
-    await sendEventReminderMail(emails, event);
+    if (userEmails.length > 0) {
+      for (const email of userEmails) {
+        await reminderQueue.add(
+          // async () => {
+          //   await sendEventCancellationMail(user, event);
+          // },
+          // {
+          //   attempts: 3,
+          // },
+          'event-reminder-email',
+          {
+            email,
+            event,
+          },
+        );
+      }
+    }
 
     await sendNotification({
       userIds,
@@ -109,7 +133,7 @@ const executeEventReminder = async (scheduler) => {
 
     console.log(`Reminder Notification sent to ${userIds.length} users`);
 
-    console.log(`Reminder sent to ${emails.length} users`);
+    console.log(`Reminder sent to ${userEmails.length} users`);
   } catch (err) {
     throw err;
   }

@@ -135,6 +135,8 @@ const sendRegistrationCancellationMail = async (user, registration) => {
 };
 
 const sendEventCancellationMail = async (email, event) => {
+  console.log('>>>>>>>Email', email);
+
   const templatePath = path.join(
     __dirname,
     '../view/templates/event-cancellation.html',
@@ -157,8 +159,8 @@ const sendEventCancellationMail = async (email, event) => {
   });
 };
 
-const sendEventReminderMail = async (emails, event) => {
-  const userEmails = emails.map((item) => item.email);
+const sendEventReminderMail = async (email, event) => {
+  console.log('>>>>>>>Email', email);
 
   const templatePath = path.join(
     __dirname,
@@ -174,9 +176,12 @@ const sendEventReminderMail = async (emails, event) => {
     .replace(/{{event_address}}/g, event.address)
     .replace(/{{event_city}}/g, event.city);
 
+  console.log('EMAIL BEFORE SEND:', email);
+  console.log('MAIL_FROM:', process.env.MAIL_FROM);
+
   await transporter.sendMail({
     from: process.env.MAIL_FROM,
-    to: userEmails,
+    to: email,
     subject: `Reminder - ${event.title}`,
     html,
   });
@@ -394,3 +399,9 @@ module.exports = {
   sendQuantityConfirmationMail,
   sendWaitlistStatusMail,
 };
+
+//user-register
+//organizer-register
+//ticket
+
+//waitlist-promotional

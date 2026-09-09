@@ -28,6 +28,8 @@ const {
 } = require('../service/email.service');
 const { generateAuditlog } = require('./auditlogs.service');
 
+const userQueue = require('../queues/bullmq.userQueue');
+
 const registerUser = async (body) => {
   const transaction = await sequelize.transaction();
 
@@ -72,7 +74,18 @@ const registerUser = async (body) => {
       },
     );
 
-    await sendRegistrationSuccessMail(user);
+    await userQueue.add(
+      // async () => {
+      //   await sendEventCancellationMail(user, event);
+      // },
+      // {
+      //   attempts: 3,
+      // },
+      'user-registration-email',
+      {
+        user,
+      },
+    );
 
     const payload = {
       id: user.id,

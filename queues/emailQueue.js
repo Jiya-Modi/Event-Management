@@ -1,12 +1,16 @@
-const logger = require('../config/logger');
+const logger = require('../utils/logger');
 
 class EmailQueue {
   //A class allows us to create an object that maintains its own state.
   constructor() {
     this.queue = []; //stores email jobs
     this.isProcessing = false;
+
+    // this.concurrency = 2;
+    // this.activeJobs = 0;
   }
 
+  //Producer
   add(job, options = {}) {
     const queueItem = {
       job, //send event cancellation mail-> function job()
@@ -18,11 +22,13 @@ class EmailQueue {
 
     logger.info('Email job added to queue', {
       queueSize: this.queue.length,
+      //activejobs: this.activeJobs,
     });
 
     this.process(); //A new job has arrived. Check if you can start processing
   }
 
+  //Worker
   async process() {
     // If an email is already being processed,
     // don't start another process
@@ -39,6 +45,14 @@ class EmailQueue {
     }
 
     this.isProcessing = false;
+
+    // while (this.activeJobs < this.concurrency && this.queue.length > 0) {
+    //   const queueItem = this.queue.shift();
+
+    //   this.activeJobs++;
+
+    //   this.executeJob(queueItem);
+    // }
   }
 
   async executeJob(queueItem) {
@@ -47,6 +61,7 @@ class EmailQueue {
 
       logger.info('Email job started', {
         attempt: queueItem.currentAttempt,
+        //activejobs: this.activeJobs,
       });
 
       await queueItem.job();
@@ -72,6 +87,13 @@ class EmailQueue {
         });
       }
     }
+    // finally {
+    //   // This job is no longer running
+    //   this.activeJobs--;
+
+    //   // Check whether another queued job can start.
+    //   this.process();
+    // }
   }
 }
 
