@@ -37,6 +37,8 @@ const { generateAuditlog } = require('./auditlogs.service');
 
 const { getIO } = require('../socket');
 
+const organizerQueue = require('../queues/bullmq.organizerQueue');
+
 const destroyUser = async (userId, query) => {
   const transaction = await sequelize.transaction();
 
@@ -467,7 +469,18 @@ const addOrganizer = async (userId, body) => {
       },
     );
 
-    await sendOrganizerRegistrationSuccessMail(user);
+    await organizerQueue.add(
+      // async () => {
+      //   await sendOrganizerRegistrationSuccessMail(user, event);
+      // },
+      // {
+      //   attempts: 3,
+      // },
+      'organizer-registration-email',
+      {
+        user,
+      },
+    );
 
     const payload = {
       id: user.id,

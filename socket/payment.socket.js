@@ -23,6 +23,8 @@ const { sendTicketMail } = require('../service/email.service');
 
 const processingTickets = new Set();
 
+const ticketQueue = require('../queues/bullmq.ticketQueue');
+
 const registerPaymentSocket = (secureIo, socket) => {
   socket.on('pay_ticket', async ({ registration_id }) => {
     let ticketId;
@@ -307,13 +309,21 @@ const registerPaymentSocket = (secureIo, socket) => {
         qrBuffer,
       });
 
-      await sendTicketMail({
-        email: user.email,
-        name: user.name,
-        eventName: event.title,
-        registration_id: registration.registration_id,
-        pdfBuffer,
-      });
+      await ticketQueue.add(
+        // async () => {
+        //   await sendTicketMail(user, event);
+        // },
+        // {
+        //   attempts: 3,
+        // },
+        'ticket-email',
+        {
+          user,
+          event,
+          registration,
+          pdfBuffer,
+        },
+      );
 
       socket.emit('socket_response', {
         success: true,

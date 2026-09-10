@@ -35,11 +35,11 @@ adminRouter.post(
   validate(addOrganizerSchema),
   authenticate,
   authorize(ROLES.SUPER_ADMIN),
-  rateLimiter(
-    RATELIMIT.REGISTER.WINDOW_MS,
-    RATELIMIT.REGISTER.MAX,
-    Messages.REGISTER_LIMIT,
-  ),
+  // rateLimiter(
+  //   RATELIMIT.REGISTER.WINDOW_MS,
+  //   RATELIMIT.REGISTER.MAX,
+  //   Messages.REGISTER_LIMIT,
+  // ),
   adminController.addOrganizer,
 );
 

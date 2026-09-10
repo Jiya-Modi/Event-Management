@@ -47,6 +47,10 @@ app.use('/api/v1/notification/', notificationRouter);
 
 app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
 
+// const crypto = require('crypto');
+// const key = crypto.randomBytes(32);
+// console.log(key.toString('hex'));
+
 router.get('/', (_req, res) => {
   res
     .status(200)

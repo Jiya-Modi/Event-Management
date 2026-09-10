@@ -24,6 +24,7 @@ const sendRegistrationSuccessMail = async (user) => {
 };
 
 const sendOrganizerRegistrationSuccessMail = async (user) => {
+  console.log(user);
   const templatePath = path.join(
     __dirname,
     '../view/templates/organizer-registration.html',
@@ -402,6 +403,7 @@ module.exports = {
 
 //user-register
 //organizer-register
+
 //ticket
 
 //waitlist-promotional
