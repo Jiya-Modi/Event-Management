@@ -30,16 +30,30 @@ const { generateAuditlog } = require('./auditlogs.service');
 
 const userQueue = require('../queues/bullmq.userQueue');
 
+const { fn, col, where } = require('sequelize');
+
 const registerUser = async (body) => {
   const transaction = await sequelize.transaction();
 
   try {
     const { name, email, password } = body;
 
+    console.log('KEY EXISTS:', Boolean(process.env.ENCRYPTION_KEY));
+
     const existingUser = await User.findOne({
-      where: { email },
+      where: where(
+        fn('pgp_sym_decrypt', col('email'), process.env.ENCRYPTION_KEY),
+        email,
+      ),
       transaction,
     });
+
+    // const existingUser = await User.findOne({
+    //   where: {
+    //     email,
+    //   },
+    //   transaction,
+    // });
 
     if (existingUser) {
       const err = new Error(getMessage(Messages.ALREADY_EXISTS, 'Email'));
@@ -65,7 +79,9 @@ const registerUser = async (body) => {
     const user = await User.create(
       {
         name,
-        email,
+
+        email: fn('pgp_sym_encrypt', email, process.env.ENCRYPTION_KEY),
+
         password: hashedPassword,
         role_id: role.id,
       },
@@ -73,6 +89,20 @@ const registerUser = async (body) => {
         transaction,
       },
     );
+
+    // const user = await User.create(
+    //   {
+    //     name,
+
+    //     email,
+
+    //     password: hashedPassword,
+    //     role_id: role.id,
+    //   },
+    //   {
+    //     transaction,
+    //   },
+    // );
 
     await userQueue.add(
       // async () => {
@@ -161,7 +191,10 @@ const login = async (body) => {
     const { email, password } = body;
 
     const user = await User.findOne({
-      where: { email },
+      where: where(
+        fn('pgp_sym_decrypt', col('email'), process.env.ENCRYPTION_KEY),
+        email,
+      ),
       include: [
         {
           model: Role,
@@ -171,6 +204,20 @@ const login = async (body) => {
       ],
       transaction,
     });
+
+    // const users = await User.findAll({
+    //   attributes: ['id', 'name', 'email', 'password', 'role_id'],
+    //   include: [
+    //     {
+    //       model: Role,
+    //       as: 'role',
+    //       attributes: ['id', 'name'],
+    //     },
+    //   ],
+    //   transaction,
+    // });
+
+    // const user = users.find((user) => user.email === email);
 
     if (!user) {
       const err = new Error(Messages.INVALID_CREDENTIALS);

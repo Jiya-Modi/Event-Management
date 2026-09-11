@@ -17,7 +17,7 @@ module.exports = {
       },
 
       email: {
-        type: Sequelize.STRING(255),
+        type: Sequelize.BLOB,
         allowNull: false,
       },
 

@@ -73,6 +73,8 @@ const sendTicketMail = async ({
   registration_id,
 }) => {
   try {
+    console.log(email);
+
     const templatePath = path.join(
       __dirname,
       '../view/templates/event-ticket.html',

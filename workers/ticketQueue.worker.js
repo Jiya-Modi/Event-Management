@@ -18,6 +18,8 @@ const ticketWorker = new Worker(
 
     if (job.name === 'ticket-email') {
       const { user, event, registration, pdfbuffer } = job.data;
+
+      console.log(email);
       await sendTicketMail(user, event, registration, pdfbuffer);
     }
   },

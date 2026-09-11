@@ -17,7 +17,7 @@ const { generateAuditlog } = require('../service/auditlogs.service');
 
 const { generateQRCode } = require('../utils/qrGenerator');
 
-const { generateTicketPDF } = require('../utils/ticketPdf');
+const { generateTicketPdf } = require('../utils/ticketPdf');
 
 const { sendTicketMail } = require('../service/email.service');
 
@@ -25,18 +25,31 @@ const processingTickets = new Set();
 
 const ticketQueue = require('../queues/bullmq.ticketQueue');
 
+const { fn, col, literal } = require('sequelize');
+
 const registerPaymentSocket = (secureIo, socket) => {
   socket.on('pay_ticket', async ({ registration_id }) => {
     let ticketId;
 
     try {
       const userId = socket.user.id;
-
       const user = await User.findOne({
         where: {
           id: userId,
         },
+        attributes: {
+          include: [
+            [
+              literal(
+                `pgp_sym_decrypt("email", '${process.env.ENCRYPTION_KEY}')`,
+              ),
+              'decrypted_email',
+            ],
+          ],
+        },
       });
+
+      const decrypted_email = user.get('decrypted_email');
 
       if (!user) {
         socket.emit('socket_response', {
@@ -300,30 +313,42 @@ const registerPaymentSocket = (secureIo, socket) => {
         quantity,
       );
 
-      const pdfBuffer = await generateTicketPDF({
+      const ticketData = {
         quantity,
         registration,
         user,
         event,
         ticket,
         qrBuffer,
+      };
+
+      const pdfBuffer = await generateTicketPdf(ticketData);
+
+      await sendTicketMail({
+        email: decrypted_email,
+        name: user.name,
+        eventName: event.title,
+        registration_id: registration.registration_id,
+        pdfBuffer,
       });
 
-      await ticketQueue.add(
-        // async () => {
-        //   await sendTicketMail(user, event);
-        // },
-        // {
-        //   attempts: 3,
-        // },
-        'ticket-email',
-        {
-          user,
-          event,
-          registration,
-          pdfBuffer,
-        },
-      );
+      console.log(1);
+
+      // await ticketQueue.add(
+      //   // async () => {
+      //   //   await sendTicketMail(user, event);
+      //   // },
+      //   // {
+      //   //   attempts: 3,
+      //   // },
+      //   'ticket-email',
+      //   {
+      //     user,
+      //     event,
+      //     registration,
+      //     pdfBuffer,
+      //   },
+      // );
 
       socket.emit('socket_response', {
         success: true,

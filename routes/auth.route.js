@@ -21,11 +21,11 @@ const {
 authRouter.post(
   '/signup',
   validate(registerUserSchema),
-  rateLimiter(
-    RATELIMIT.REGISTER.WINDOW_MS,
-    RATELIMIT.REGISTER.MAX,
-    Messages.REGISTER_LIMIT,
-  ),
+  // rateLimiter(
+  //   RATELIMIT.REGISTER.WINDOW_MS,
+  //   RATELIMIT.REGISTER.MAX,
+  //   Messages.REGISTER_LIMIT,
+  // ),
   authController.registerUser,
 );
 

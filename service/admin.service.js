@@ -39,6 +39,8 @@ const { getIO } = require('../socket');
 
 const organizerQueue = require('../queues/bullmq.organizerQueue');
 
+const { fn, col, where } = require('sequelize');
+
 const destroyUser = async (userId, query) => {
   const transaction = await sequelize.transaction();
 
@@ -431,7 +433,10 @@ const addOrganizer = async (userId, body) => {
     const { name, email, password, organization_name } = body;
 
     const existingOrganizer = await User.findOne({
-      where: { email },
+      where: where(
+        fn('pgp_sym_decrypt', col('email'), process.env.ENCRYPTION_KEY),
+        email,
+      ),
       transaction,
     });
 
@@ -456,10 +461,25 @@ const addOrganizer = async (userId, body) => {
 
     const hashedPassword = await bcrypt.hash(password, 10);
 
+    // const user = await User.create(
+    //   {
+    //     name,
+    //     email,
+    //     password: hashedPassword,
+    //     organization_name,
+    //     role_id: role.id,
+    //   },
+    //   {
+    //     transaction,
+    //   },
+    // );
+
     const user = await User.create(
       {
         name,
-        email,
+
+        email: fn('pgp_sym_encrypt', email, process.env.ENCRYPTION_KEY),
+
         password: hashedPassword,
         organization_name,
         role_id: role.id,
