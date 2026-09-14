@@ -15,17 +15,11 @@ const getMessage = require('../utils/messageFormatter');
 
 const { generateAuditlog } = require('../service/auditlogs.service');
 
-const { generateQRCode } = require('../utils/qrGenerator');
-
-const { generateTicketPdf } = require('../utils/ticketPdf');
-
-const { sendTicketMail } = require('../service/email.service');
-
-const processingTickets = new Set();
-
 const ticketQueue = require('../queues/bullmq.ticketQueue');
 
-const { fn, col, literal } = require('sequelize');
+const { literal } = require('sequelize');
+
+const processingTickets = new Set();
 
 const registerPaymentSocket = (secureIo, socket) => {
   socket.on('pay_ticket', async ({ registration_id }) => {
@@ -33,10 +27,12 @@ const registerPaymentSocket = (secureIo, socket) => {
 
     try {
       const userId = socket.user.id;
+
       const user = await User.findOne({
         where: {
           id: userId,
         },
+
         attributes: {
           include: [
             [
@@ -49,8 +45,6 @@ const registerPaymentSocket = (secureIo, socket) => {
         },
       });
 
-      const decrypted_email = user.get('decrypted_email');
-
       if (!user) {
         socket.emit('socket_response', {
           success: false,
@@ -61,15 +55,19 @@ const registerPaymentSocket = (secureIo, socket) => {
         return;
       }
 
+      const decrypted_email = user.get('decrypted_email');
+
       const registration = await Registration.findOne({
         where: {
           registration_id,
           user_id: userId,
         },
+
         include: [
           {
             model: Ticket,
             as: 'ticket',
+
             include: [
               {
                 model: Event,
@@ -116,10 +114,6 @@ const registerPaymentSocket = (secureIo, socket) => {
       }
 
       processingTickets.add(ticketId);
-
-      await new Promise((resolve) => {
-        setTimeout(resolve, 5000);
-      });
 
       const event = ticket.event;
 
@@ -203,6 +197,7 @@ const registerPaymentSocket = (secureIo, socket) => {
 
         await registration.update({
           payment_status: PAYMENT_STATUS.PAID,
+
           status: REGISTRATION_STATUS.WAITLIST,
         });
 
@@ -218,9 +213,13 @@ const registerPaymentSocket = (secureIo, socket) => {
 
         await generateAuditlog({
           action_by: userId,
+
           entity_id: registration.id,
+
           action: AUDIT_ACTIONS.UPDATE,
+
           module: AUDIT_MODULES.REGISTRATION,
+
           values: {
             oldvalue: {
               reg_id: registration.id,
@@ -232,6 +231,7 @@ const registerPaymentSocket = (secureIo, socket) => {
               status: REGISTRATION_STATUS.REGISTERED,
               payment_status: PAYMENT_STATUS.PENDING,
             },
+
             newvalue: {
               reg_id: registration.id,
               ticket_id: ticket.id,
@@ -247,13 +247,17 @@ const registerPaymentSocket = (secureIo, socket) => {
 
         socket.emit('ticket_waitlisted', {
           ticketId: ticket.id,
+
           registration_id: registration.registration_id,
+
           message: 'Ticket is full. You have been added to the waitlist.',
         });
 
         socket.emit('socket_response', {
           success: true,
+
           message: 'Ticket is full. User added to waitlist.',
+
           data: registration,
         });
 
@@ -267,6 +271,7 @@ const registerPaymentSocket = (secureIo, socket) => {
       secureIo.to('admin_dashboard').emit('admin_dashboard_update', {
         type: 'REGISTRATION_STATUS_UPDATED',
       });
+
       secureIo
         .to(`organizer_${event.created_by}`)
         .emit('organizer_dashboard_update', {
@@ -275,9 +280,13 @@ const registerPaymentSocket = (secureIo, socket) => {
 
       await generateAuditlog({
         action_by: userId,
+
         entity_id: registration.id,
+
         action: AUDIT_ACTIONS.UPDATE,
+
         module: AUDIT_MODULES.REGISTRATION,
+
         values: {
           oldvalue: {
             reg_id: registration.id,
@@ -288,6 +297,7 @@ const registerPaymentSocket = (secureIo, socket) => {
             status: REGISTRATION_STATUS.REGISTERED,
             payment_status: PAYMENT_STATUS.PENDING,
           },
+
           newvalue: {
             reg_id: registration.id,
             ticket_id: ticket.id,
@@ -308,51 +318,53 @@ const registerPaymentSocket = (secureIo, socket) => {
         availableQuantity,
       });
 
-      const qrBuffer = await generateQRCode(
-        registration.registration_id,
-        quantity,
+      await ticketQueue.add(
+        'ticket-email',
+        {
+          registrationId: registration.registration_id,
+
+          quantity,
+
+          user: {
+            id: user.id,
+            name: user.name,
+            email: decrypted_email,
+          },
+
+          event: {
+            id: event.id,
+            title: event.title,
+            start_date: event.start_date,
+            address: event.address,
+          },
+
+          ticket: {
+            id: ticket.id,
+            name: ticket.name,
+            price: ticket.price,
+          },
+        },
+
+        {
+          attempts: 3,
+
+          backoff: {
+            type: 'exponential',
+            delay: 5000,
+          },
+
+          removeOnComplete: true,
+
+          removeOnFail: false,
+        },
       );
-
-      const ticketData = {
-        quantity,
-        registration,
-        user,
-        event,
-        ticket,
-        qrBuffer,
-      };
-
-      const pdfBuffer = await generateTicketPdf(ticketData);
-
-      await sendTicketMail({
-        email: decrypted_email,
-        name: user.name,
-        eventName: event.title,
-        registration_id: registration.registration_id,
-        pdfBuffer,
-      });
-
-      console.log(1);
-
-      // await ticketQueue.add(
-      //   // async () => {
-      //   //   await sendTicketMail(user, event);
-      //   // },
-      //   // {
-      //   //   attempts: 3,
-      //   // },
-      //   'ticket-email',
-      //   {
-      //     user,
-      //     event,
-      //     registration,
-      //     pdfBuffer,
-      //   },
-      // );
 
       socket.emit('socket_response', {
         success: true,
-        message: 'Payment completed successfully.',
+
+        message:
+          'Payment completed successfully. Your ticket will be emailed shortly.',
+
         data: registration,
       });
     } catch (error) {
@@ -360,7 +372,9 @@ const registerPaymentSocket = (secureIo, socket) => {
 
       socket.emit('socket_response', {
         success: false,
+
         statusCode: error.statusCode || STATUS_CODES.INTERNAL_SERVER_ERROR,
+
         message: error.message || 'Payment failed',
       });
     } finally {

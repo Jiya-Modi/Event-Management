@@ -25,12 +25,12 @@ userRouter.post(
   userController.registerEvent,
 );
 
-// userRouter.post(
-//   '/pay-ticket',
-//   authenticate,
-//   authorize(ROLES.USER),
-//   userController.payTicket,
-// );
+userRouter.post(
+  '/pay-ticket',
+  authenticate,
+  authorize(ROLES.USER),
+  userController.payTicket,
+);
 
 userRouter.get('/check-in', validate(checkInSchema), userController.checkIn);
 

@@ -19,21 +19,21 @@ const registerEvent = async (req, res, next) => {
   }
 };
 
-// const payTicket = async (req, res, next) => {
-//   try {
-//     const data = await userService.payTicket(req.user.id, req.body);
+const payTicket = async (req, res, next) => {
+  try {
+    const data = await userService.payTicket(req.user.id, req.body);
 
-//     return success(
-//       res,
-//       STATUS_CODES.OK,
-//       Messages.PAYMENT_SUCCESS,
-//       MODULES.USER,
-//       data,
-//     );
-//   } catch (error) {
-//     next(error);
-//   }
-// };
+    return success(
+      res,
+      STATUS_CODES.OK,
+      Messages.PAYMENT_SUCCESS,
+      MODULES.USER,
+      data,
+    );
+  } catch (error) {
+    next(error);
+  }
+};
 
 const checkIn = async (req, res, next) => {
   try {
@@ -110,5 +110,5 @@ module.exports = {
   getUserDashboard,
   editUserProfile,
   addEventFeedback,
-  // payTicket,
+  payTicket,
 };

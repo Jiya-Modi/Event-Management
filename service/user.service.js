@@ -29,7 +29,7 @@ const { generateRegistrationNumber } = require('../utils/helper');
 
 const { generateQRCode } = require('../utils/qrGenerator');
 
-const { generateTicketPDF } = require('../utils/ticketPdf');
+const { generateTicketPdf } = require('../utils/ticketPdf');
 
 const {
   sendTicketMail,
@@ -43,6 +43,8 @@ const { Op } = require('sequelize');
 const { generateAuditlog } = require('./auditlogs.service');
 
 const { getIO } = require('../socket');
+
+const { fn, col, literal } = require('sequelize');
 
 const registerEventTicket = async (userId, body) => {
   const transaction = await sequelize.transaction();
@@ -174,254 +176,279 @@ const registerEventTicket = async (userId, body) => {
   }
 };
 
-// const payTicket = async (userId, body) => {
-//   const transaction = await sequelize.transaction();
+const payTicket = async (userId, body) => {
+  const transaction = await sequelize.transaction();
 
-//   try {
-//     const { registration_id } = body;
+  try {
+    const { registration_id } = body;
 
-//     const user = await User.findOne({
-//       where: {
-//         id: userId,
-//       },
-//       transaction,
-//     });
+    // Get user with decrypted email
+    const user = await User.findOne({
+      where: {
+        id: userId,
+      },
+      attributes: {
+        include: [
+          [
+            literal(
+              `pgp_sym_decrypt("email", '${process.env.ENCRYPTION_KEY}')`,
+            ),
+            'decrypted_email',
+          ],
+        ],
+      },
+      transaction,
+    });
 
-//     if (!user) {
-//       const error = new Error(getMessage(Messages.NOT_FOUND, MODULES.USER));
+    // Check user before accessing it
+    if (!user) {
+      const error = new Error(getMessage(Messages.NOT_FOUND, MODULES.USER));
 
-//       error.statusCode = STATUS_CODES.NOT_FOUND;
-//       throw error;
-//     }
+      error.statusCode = STATUS_CODES.NOT_FOUND;
+      throw error;
+    }
 
-//     const registration = await Registration.findOne({
-//       where: {
-//         registration_id,
-//         user_id: userId,
-//       },
-//       include: [
-//         {
-//           model: Ticket,
-//           as: 'ticket',
-//           include: [
-//             {
-//               model: Event,
-//               as: 'event',
-//             },
-//           ],
-//         },
-//       ],
-//       transaction,
-//     });
+    const decrypted_email = user.get('decrypted_email');
 
-//     if (!registration) {
-//       const error = new Error(
-//         getMessage(Messages.NOT_FOUND, MODULES.REGISTRATION),
-//       );
+    // Get registration
+    const registration = await Registration.findOne({
+      where: {
+        registration_id,
+        user_id: userId,
+      },
+      include: [
+        {
+          model: Ticket,
+          as: 'ticket',
+          include: [
+            {
+              model: Event,
+              as: 'event',
+            },
+          ],
+        },
+      ],
+      transaction,
+    });
 
-//       error.statusCode = STATUS_CODES.NOT_FOUND;
-//       throw error;
-//     }
+    if (!registration) {
+      const error = new Error(
+        getMessage(Messages.NOT_FOUND, MODULES.REGISTRATION),
+      );
 
-//     if (registration.payment_status === PAYMENT_STATUS.PAID) {
-//       const error = new Error(
-//         getMessage(Messages.PAYMENT_ALREADY_COMPLETED, MODULES.TICKET),
-//       );
+      error.statusCode = STATUS_CODES.NOT_FOUND;
+      throw error;
+    }
 
-//       error.statusCode = STATUS_CODES.BAD_REQUEST;
-//       throw error;
-//     }
+    // Check if already paid
+    if (registration.payment_status === PAYMENT_STATUS.PAID) {
+      const error = new Error(
+        getMessage(Messages.PAYMENT_ALREADY_COMPLETED, MODULES.TICKET),
+      );
 
-//     const ticket = registration.ticket;
-//     const event = ticket?.event;
+      error.statusCode = STATUS_CODES.BAD_REQUEST;
+      throw error;
+    }
 
-//     if (!ticket) {
-//       const error = new Error(getMessage(Messages.NOT_FOUND, MODULES.TICKET));
+    const ticket = registration.ticket;
+    const event = ticket?.event;
 
-//       error.statusCode = STATUS_CODES.NOT_FOUND;
-//       throw error;
-//     }
+    if (!ticket) {
+      const error = new Error(getMessage(Messages.NOT_FOUND, MODULES.TICKET));
 
-//     if (!event) {
-//       const error = new Error(getMessage(Messages.NOT_FOUND, MODULES.EVENT));
+      error.statusCode = STATUS_CODES.NOT_FOUND;
+      throw error;
+    }
 
-//       error.statusCode = STATUS_CODES.NOT_FOUND;
-//       throw error;
-//     }
+    if (!event) {
+      const error = new Error(getMessage(Messages.NOT_FOUND, MODULES.EVENT));
 
-//     const currentDateTime = new Date();
-//     const startDate = new Date(event.start_date);
+      error.statusCode = STATUS_CODES.NOT_FOUND;
+      throw error;
+    }
 
-//     const minimumDifference = 48 * 60 * 60 * 1000;
+    // Check payment deadline
+    const currentDateTime = new Date();
+    const startDate = new Date(event.start_date);
 
-//     const difference = startDate.getTime() - currentDateTime.getTime();
+    const minimumDifference = 48 * 60 * 60 * 1000;
 
-//     if (difference < minimumDifference) {
-//       const error = new Error('Payment can be done before 48 hours');
+    const difference = startDate.getTime() - currentDateTime.getTime();
 
-//       error.statusCode = STATUS_CODES.BAD_REQUEST;
-//       throw error;
-//     }
+    if (difference < minimumDifference) {
+      const error = new Error('Payment can be done before 48 hours');
 
-//     const registrationCount = await Registration.sum('quantity', {
-//       where: {
-//         ticket_id: ticket.id,
-//         status: REGISTRATION_STATUS.REGISTERED,
-//         payment_status: PAYMENT_STATUS.PAID,
-//       },
-//       transaction,
-//     });
+      error.statusCode = STATUS_CODES.BAD_REQUEST;
+      throw error;
+    }
 
-//     const totalRegistered = registrationCount;
+    // Count paid registrations
+    const registrationCount = await Registration.sum('quantity', {
+      where: {
+        ticket_id: ticket.id,
+        status: REGISTRATION_STATUS.REGISTERED,
+        payment_status: PAYMENT_STATUS.PAID,
+      },
+      transaction,
+    });
 
-//     const quantity = registration.quantity;
+    const totalRegistered = registrationCount || 0;
 
-//     const amount = quantity * ticket.price;
+    const quantity = registration.quantity;
 
-//     if (totalRegistered + quantity > ticket.registration_limit) {
-//       const waitlistCount = await Registration.sum('quantity', {
-//         where: {
-//           ticket_id: ticket.id,
-//           status: REGISTRATION_STATUS.WAITLIST,
-//         },
-//         transaction,
-//       });
+    const amount = quantity * Number(ticket.price);
 
-//       const totalWaitlist = waitlistCount;
+    if (totalRegistered + quantity > ticket.registration_limit) {
+      const waitlistCount = await Registration.sum('quantity', {
+        where: {
+          ticket_id: ticket.id,
+          status: REGISTRATION_STATUS.WAITLIST,
+        },
+        transaction,
+      });
 
-//       if (totalWaitlist + quantity > ticket.waitlist_limit) {
-//         const error = new Error(
-//           getMessage(Messages.WAITLIST_LIMIT_REACHED, MODULES.REGISTRATION),
-//         );
-//         error.statusCode = STATUS_CODES.BAD_REQUEST;
-//         throw error;
-//       }
+      const totalWaitlist = waitlistCount || 0;
 
-//       const registrationNumber = generateRegistrationNumber();
+      if (totalWaitlist + quantity > ticket.waitlist_limit) {
+        const error = new Error(
+          getMessage(Messages.WAITLIST_LIMIT_REACHED, MODULES.REGISTRATION),
+        );
 
-//       await Registration.update(
-//         {
-//           payment_status: PAYMENT_STATUS.PAID,
-//           status: REGISTRATION_STATUS.WAITLIST,
-//         },
-//         {
-//           where: {
-//             ticket_id: ticket.id,
-//             user_id: userId,
-//           },
-//           transaction,
-//         },
-//       );
+        error.statusCode = STATUS_CODES.BAD_REQUEST;
+        throw error;
+      }
 
-//       await transaction.commit();
+      await registration.update(
+        {
+          payment_status: PAYMENT_STATUS.PAID,
+          status: REGISTRATION_STATUS.WAITLIST,
+        },
+        {
+          transaction,
+        },
+      );
 
-//       await generateAuditlog({
-//         action_by: userId,
-//         entity_id: registration.id,
-//         action: AUDIT_ACTIONS.UPDATE,
-//         module: AUDIT_MODULES.REGISTRATION,
-//         values: {
-//           oldvalue: {
-//             reg_id: registration.id,
-//             ticket_id: ticket.id,
-//             user_id: userId,
-//             registration_id: registrationNumber,
-//             quantity: quantity,
-//             amount: amount,
-//             status: REGISTRATION_STATUS.REGISTERED,
-//             payment_status: PAYMENT_STATUS.PENDING,
-//           },
-//           newvalue: {
-//             reg_id: registration.id,
-//             ticket_id: ticket.id,
-//             user_id: userId,
-//             registration_id: registrationNumber,
-//             quantity: quantity,
-//             amount: amount,
-//             status: REGISTRATION_STATUS.WAITLIST,
-//             payment_status: PAYMENT_STATUS.PAID,
-//           },
-//         },
-//       });
+      await transaction.commit();
 
-//       return {
-//         message: 'Ticket is full. User added to waitlist.',
-//         data: Registration,
-//       };
-//     }
+      await generateAuditlog({
+        action_by: userId,
+        entity_id: registration.id,
+        action: AUDIT_ACTIONS.UPDATE,
+        module: AUDIT_MODULES.REGISTRATION,
 
-//     await registration.update(
-//       {
-//         payment_status: PAYMENT_STATUS.PAID,
-//       },
-//       {
-//         transaction,
-//       },
-//     );
+        values: {
+          oldvalue: {
+            reg_id: registration.id,
+            ticket_id: ticket.id,
+            user_id: userId,
+            registration_id: registration.registration_id,
+            quantity,
+            amount,
+            status: REGISTRATION_STATUS.REGISTERED,
+            payment_status: PAYMENT_STATUS.PENDING,
+          },
 
-//     await generateAuditlog({
-//       action_by: userId,
-//       entity_id: registration.id,
-//       action: AUDIT_ACTIONS.UPDATE,
-//       module: AUDIT_MODULES.REGISTRATION,
-//       values: {
-//         oldvalue: {
-//           reg_id: registration.id,
-//           ticket_id: ticket.id,
-//           user_id: userId,
-//           quantity: quantity,
-//           amount: amount,
-//           status: REGISTRATION_STATUS.REGISTERED,
-//           payment_status: PAYMENT_STATUS.PENDING,
-//         },
-//         newvalue: {
-//           reg_id: registration.id,
-//           ticket_id: ticket.id,
-//           user_id: userId,
-//           quantity: quantity,
-//           amount: amount,
-//           status: REGISTRATION_STATUS.REGISTERED,
-//           payment_status: PAYMENT_STATUS.PAID,
-//         },
-//       },
-//     });
+          newvalue: {
+            reg_id: registration.id,
+            ticket_id: ticket.id,
+            user_id: userId,
+            registration_id: registration.registration_id,
+            quantity,
+            amount,
+            status: REGISTRATION_STATUS.WAITLIST,
+            payment_status: PAYMENT_STATUS.PAID,
+          },
+        },
+      });
 
-//     await transaction.commit();
+      return {
+        message: 'Ticket is full. User added to waitlist.',
+        data: registration,
+      };
+    }
 
-//     const qrBuffer = await generateQRCode(registration_id, quantity);
+    await registration.update(
+      {
+        payment_status: PAYMENT_STATUS.PAID,
+      },
+      {
+        transaction,
+      },
+    );
 
-//     const pdfBuffer = await generateTicketPDF({
-//       quantity,
-//       registration,
-//       user,
-//       event,
-//       ticket,
-//       qrBuffer,
-//     });
+    await generateAuditlog({
+      action_by: userId,
+      entity_id: registration.id,
+      action: AUDIT_ACTIONS.UPDATE,
+      module: AUDIT_MODULES.REGISTRATION,
 
-//     await sendTicketMail({
-//       email: user.email,
-//       name: user.name,
-//       eventName: event.title,
-//       registration_id: registration.registration_id,
-//       pdfBuffer,
-//     });
+      values: {
+        oldvalue: {
+          reg_id: registration.id,
+          ticket_id: ticket.id,
+          user_id: userId,
+          quantity,
+          amount,
+          status: REGISTRATION_STATUS.REGISTERED,
+          payment_status: PAYMENT_STATUS.PENDING,
+        },
 
-//     return {
-//       message: 'Payment completed successfully.',
-//       data: registration,
-//     };
-//   } catch (error) {
-//     if (!transaction.finished) {
-//       await transaction.rollback();
-//     }
+        newvalue: {
+          reg_id: registration.id,
+          ticket_id: ticket.id,
+          user_id: userId,
+          quantity,
+          amount,
+          status: REGISTRATION_STATUS.REGISTERED,
+          payment_status: PAYMENT_STATUS.PAID,
+        },
+      },
+    });
 
-//     console.log('PAYMENT ERROR:', error);
+    await transaction.commit();
 
-//     throw error;
-//   }
-// };
+    const qrBuffer = await generateQRCode(
+      registration.registration_id,
+      quantity,
+    );
 
+    const ticketData = {
+      eventTitle: event.title,
+      registrationId: registration.registration_id,
+      userName: user.name,
+      email: decrypted_email,
+      eventDate: event.start_date,
+      location: event.address,
+      quantity,
+      ticketName: ticket.name,
+      ticketPrice: ticket.price,
+      qrBuffer,
+    };
+
+    const pdfBuffer = await generateTicketPdf(ticketData);
+
+    await sendTicketMail({
+      email: decrypted_email,
+      name: user.name,
+      eventName: event.title,
+      registration_id: registration.registration_id,
+      pdfBuffer,
+    });
+
+    return {
+      message: 'Payment completed successfully.',
+      data: registration,
+    };
+  } catch (error) {
+    if (!transaction.finished) {
+      await transaction.rollback();
+    }
+
+    console.log('PAYMENT ERROR:', error);
+
+    throw error;
+  }
+};
 const checkIn = async (query) => {
   const transaction = await sequelize.transaction();
 
@@ -1791,7 +1818,7 @@ module.exports = {
   processWaitlist,
   getEvents,
   getEventDetails,
-  //  payTicket,
+  payTicket,
 };
 
 //Registration closed date - 24hours before start date
