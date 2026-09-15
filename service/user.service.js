@@ -1,4 +1,6 @@
 const sequelize = require('../config/db');
+const redis = require('../config/redis');
+
 const {
   User,
   Event,
@@ -79,6 +81,8 @@ const registerEventTicket = async (userId, body) => {
       transaction,
     });
 
+    const event = ticket.event;
+
     if (!ticket) {
       const error = new Error(getMessage(Messages.NOT_FOUND, MODULES.TICKET));
       error.statusCode = STATUS_CODES.NOT_FOUND;
@@ -134,6 +138,10 @@ const registerEventTicket = async (userId, body) => {
 
     await transaction.commit();
 
+    await redis.del(`event:${event.id}`);
+
+    await redis.del(`user-dashboard`);
+
     const { secureIo } = getIO();
 
     secureIo.to('admin_dashboard').emit('admin_dashboard_update', {
@@ -182,7 +190,6 @@ const payTicket = async (userId, body) => {
   try {
     const { registration_id } = body;
 
-    // Get user with decrypted email
     const user = await User.findOne({
       where: {
         id: userId,
@@ -200,7 +207,6 @@ const payTicket = async (userId, body) => {
       transaction,
     });
 
-    // Check user before accessing it
     if (!user) {
       const error = new Error(getMessage(Messages.NOT_FOUND, MODULES.USER));
 
@@ -210,7 +216,6 @@ const payTicket = async (userId, body) => {
 
     const decrypted_email = user.get('decrypted_email');
 
-    // Get registration
     const registration = await Registration.findOne({
       where: {
         registration_id,
@@ -240,7 +245,6 @@ const payTicket = async (userId, body) => {
       throw error;
     }
 
-    // Check if already paid
     if (registration.payment_status === PAYMENT_STATUS.PAID) {
       const error = new Error(
         getMessage(Messages.PAYMENT_ALREADY_COMPLETED, MODULES.TICKET),
@@ -267,7 +271,6 @@ const payTicket = async (userId, body) => {
       throw error;
     }
 
-    // Check payment deadline
     const currentDateTime = new Date();
     const startDate = new Date(event.start_date);
 
@@ -282,7 +285,6 @@ const payTicket = async (userId, body) => {
       throw error;
     }
 
-    // Count paid registrations
     const registrationCount = await Registration.sum('quantity', {
       where: {
         ticket_id: ticket.id,
@@ -329,6 +331,8 @@ const payTicket = async (userId, body) => {
       );
 
       await transaction.commit();
+
+      await redis.del(`event:${event.id}`);
 
       await generateAuditlog({
         action_by: userId,
@@ -407,6 +411,10 @@ const payTicket = async (userId, body) => {
 
     await transaction.commit();
 
+    // await redis.del(`organizer:${userId}`);
+
+    await redis.del(`user-dashboard`);
+
     const qrBuffer = await generateQRCode(
       registration.registration_id,
       quantity,
@@ -449,6 +457,7 @@ const payTicket = async (userId, body) => {
     throw error;
   }
 };
+
 const checkIn = async (query) => {
   const transaction = await sequelize.transaction();
 
@@ -645,6 +654,8 @@ const cancelRegistration = async (userId, query) => {
       },
     );
 
+    await redis.del(`organizer:${userId}`);
+
     const { secureIo } = getIO();
 
     secureIo.to('admin_dashboard').emit('admin_dashboard_update', {
@@ -768,6 +779,10 @@ const cancelRegistration = async (userId, query) => {
 
     await transaction.commit();
 
+    await redis.del(`event:${event.id}`);
+
+    await redis.del(`user-dashboard`);
+
     await sendRegistrationCancellationMail(user, registration);
 
     return {
@@ -786,6 +801,18 @@ const cancelRegistration = async (userId, query) => {
 
 const getUserDashboard = async (userId) => {
   try {
+    const cacheKey = `user-dashboard`;
+
+    const cachedEvent = await redis.get(cacheKey);
+
+    if (cachedEvent) {
+      console.log('CACHE HIT');
+
+      return JSON.parse(cachedEvent);
+    }
+
+    console.log('CACHE MISS');
+
     const total_spent = await Registration.findOne({
       attributes: [
         [
@@ -869,12 +896,21 @@ const getUserDashboard = async (userId) => {
       ],
     });
 
-    return {
+    const data = {
       total_spent: total_spent,
       total_refund: total_refund,
       user_events: user_events,
       upcoming_events: upcoming_events,
     };
+
+    const response = {
+      message: 'User Dashboard fetched successfully.',
+      data,
+    };
+
+    await redis.set(cacheKey, JSON.stringify(response));
+
+    return response;
   } catch (err) {
     console.log(err);
     throw err;
@@ -1647,6 +1683,8 @@ const processTicketWaitlist = async (ticket, ticketId, eventId) => {
     }
 
     await transaction.commit();
+
+    await redis.del(`event:${event.id}`);
 
     console.log('>>>>> Ticket waitlist processed successfully');
 

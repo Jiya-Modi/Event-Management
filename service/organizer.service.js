@@ -1,4 +1,5 @@
 const sequelize = require('../config/db');
+const redis = require('../config/redis');
 
 const fs = require('fs/promises');
 const path = require('path');
@@ -175,17 +176,17 @@ const addEditEvent = async (userId, body) => {
             registration_closed_at: event.registration_closed_at,
           },
           newvalue: {
-            title: title,
-            description: description,
-            category_id: category_id,
-            address: address,
-            city: city,
-            state: state,
-            country: country,
-            start_date: start_date,
-            end_date: end_date,
-            publish_at: publish_at,
-            registration_closed_at: registration_closed_at,
+            title,
+            description,
+            category_id,
+            address,
+            city,
+            state,
+            country,
+            start_date,
+            end_date,
+            publish_at,
+            registration_closed_at,
           },
         },
       });
@@ -212,6 +213,8 @@ const addEditEvent = async (userId, body) => {
       }
 
       await transaction.commit();
+
+      await redis.del(`event:${event.id}`);
 
       const { secureIo } = getIO();
 
@@ -282,6 +285,10 @@ const addEditEvent = async (userId, body) => {
       { transaction },
     );
 
+    await redis.del(`organizer-dashboard:${userId}`);
+
+    await redis.del(`user-dashboard`);
+
     await transaction.commit();
 
     const { secureIo } = getIO();
@@ -294,7 +301,7 @@ const addEditEvent = async (userId, body) => {
       type: 'EVENT_CREATED',
     });
 
-    const auditlog = await generateAuditlog({
+    await generateAuditlog({
       action_by: user.id,
       entity_id: event.id,
       action: AUDIT_ACTIONS.CREATE,
@@ -303,17 +310,17 @@ const addEditEvent = async (userId, body) => {
         oldvalue: {},
         newvalue: {
           created_by: userId,
-          title: title,
-          description: description,
-          category_id: category_id,
-          address: address,
-          city: city,
-          state: state,
-          country: country,
-          start_date: start_date,
-          end_date: end_date,
-          publish_at: publish_at,
-          registration_closed_at: registration_closed_at,
+          title,
+          description,
+          category_id,
+          address,
+          city,
+          state,
+          country,
+          start_date,
+          end_date,
+          publish_at,
+          registration_closed_at,
         },
       },
     });
@@ -458,6 +465,8 @@ const addEditTicket = async (userId, body) => {
       }
 
       result.push(...updatedTickets);
+
+      await redis.del(`event:${event.id}`);
     }
 
     if (newTickets.length > 0) {
@@ -528,7 +537,6 @@ const destroyEvent = async (userId, query) => {
 
     if (!user) {
       const error = new Error(getMessage(Messages.NOT_FOUND, MODULES.USER));
-
       error.statusCode = STATUS_CODES.NOT_FOUND;
       throw error;
     }
@@ -551,7 +559,6 @@ const destroyEvent = async (userId, query) => {
 
     if (!event) {
       const error = new Error(getMessage(Messages.NOT_FOUND, MODULES.EVENT));
-
       error.statusCode = STATUS_CODES.NOT_FOUND;
       throw error;
     }
@@ -564,7 +571,6 @@ const destroyEvent = async (userId, query) => {
 
     if (!allowedStatuses.includes(event.status)) {
       const error = new Error('Event cannot be deleted in its current status.');
-
       error.statusCode = STATUS_CODES.BAD_REQUEST;
       throw error;
     }
@@ -580,7 +586,6 @@ const destroyEvent = async (userId, query) => {
       const error = new Error(
         'Event cannot be cancelled within 72 hours of its start time.',
       );
-
       error.statusCode = STATUS_CODES.BAD_REQUEST;
       throw error;
     }
@@ -596,9 +601,7 @@ const destroyEvent = async (userId, query) => {
 
     let emails = [];
     let userIds = [];
-
     let registrations = [];
-
     let userEmails = [];
 
     const allowedRegistrationStatus = [
@@ -640,24 +643,16 @@ const destroyEvent = async (userId, query) => {
           email: registration.user.email,
         }));
 
-      console.log(emails);
-
       userEmails = [...new Set(emails.map((item) => item.email))];
-
-      console.log(userEmails);
 
       userIds = [
         ...new Set(registrations.map((registration) => registration.user_id)),
       ];
     }
 
-    console.log(userIds);
-
     const registrationIds = registrations.map(
       (registration) => registration.id,
     );
-
-    console.log(registrationIds);
 
     let partialRegistrations = [];
 
@@ -906,21 +901,14 @@ const destroyEvent = async (userId, query) => {
 
     await transaction.commit();
 
+    await redis.del(`event:${event.id}`);
+
     if (userEmails.length > 0) {
       for (const user of userEmails) {
-        await emailQueue.add(
-          // async () => {
-          //   await sendEventCancellationMail(user, event);
-          // },
-          // {
-          //   attempts: 3,
-          // },
-          'event-cancellation-email',
-          {
-            user,
-            event,
-          },
-        );
+        await emailQueue.add('event-cancellation-email', {
+          user,
+          event,
+        });
       }
     }
 
@@ -947,6 +935,18 @@ const destroyEvent = async (userId, query) => {
 
 const getOrganizerDashboard = async (userId) => {
   try {
+    const cacheKey = `organizer-dashboard:${userId}`;
+
+    const cachedEvent = await redis.get(cacheKey);
+
+    if (cachedEvent) {
+      console.log('CACHE HIT');
+
+      return JSON.parse(cachedEvent);
+    }
+
+    console.log('CACHE MISS');
+
     const total_events = await Event.count({
       group: ['status'],
       paranoid: false,
@@ -1087,13 +1087,22 @@ const getOrganizerDashboard = async (userId) => {
       raw: true,
     });
 
-    return {
+    const data = {
       total_events: total_events,
       total_revenue: total_revenue,
       total_refunded: total_refunded,
       maxRegisteredEvent: maxRegisteredEvent,
       minRegisteredEvent: minRegisteredEvent,
     };
+
+    const response = {
+      message: 'Organizer Dashboard fetched successfully.',
+      data,
+    };
+
+    await redis.set(cacheKey, JSON.stringify(response));
+
+    return response;
   } catch (err) {
     console.log(err);
     throw error;
@@ -1219,14 +1228,31 @@ const getEventDetails = async (query) => {
       sortOrder = 'DESC',
     } = query;
 
-    const offset = (page - 1) * limit;
-
-    const where = {};
-    const Registrationwhere = {};
-
-    if (event_id) {
-      where.event_id = event_id;
+    if (!event_id) {
+      const error = new Error('Event ID is required.');
+      error.statusCode = STATUS_CODES.BAD_REQUEST;
+      throw error;
     }
+
+    const offset = (Number(page) - 1) * Number(limit);
+
+    const cacheKey = `event-details:${event_id}:${page}:${limit}:${username || ''}:${ticket_name || ''}:${event_status || ''}:${payment_status || ''}:${checked_in_at || ''}:${sortBy}:${sortOrder}`;
+
+    const cachedEvent = await redis.get(cacheKey);
+
+    if (cachedEvent) {
+      console.log('CACHE HIT');
+
+      return JSON.parse(cachedEvent);
+    }
+
+    console.log('CACHE MISS');
+
+    const where = {
+      event_id,
+    };
+
+    const registrationWhere = {};
 
     if (ticket_name) {
       where.name = {
@@ -1235,21 +1261,21 @@ const getEventDetails = async (query) => {
     }
 
     if (event_status) {
-      Registrationwhere.status = event_status;
+      registrationWhere.status = event_status;
     }
 
     if (payment_status) {
-      Registrationwhere.payment_status = payment_status;
+      registrationWhere.payment_status = payment_status;
     }
 
     if (checked_in_at === 'true') {
-      Registrationwhere.checked_in_at = {
+      registrationWhere.checked_in_at = {
         [Op.ne]: null,
       };
     }
 
     if (checked_in_at === 'false') {
-      Registrationwhere.checked_in_at = {
+      registrationWhere.checked_in_at = {
         [Op.is]: null,
       };
     }
@@ -1295,12 +1321,14 @@ const getEventDetails = async (query) => {
     });
 
     if (!event) {
-      throw new Error('Event not found');
+      const error = new Error(getMessage(Messages.NOT_FOUND, MODULES.EVENT));
+      error.statusCode = STATUS_CODES.NOT_FOUND;
+      throw error;
     }
 
     const eventData = event.toJSON();
 
-    eventData.banners = eventData.banners.map((banner) => ({
+    eventData.banners = (eventData.banners || []).map((banner) => ({
       id: banner.id,
       filename: banner.filename,
       url: `/uploads/events/banners/event_${eventData.id}/${banner.filename}`,
@@ -1331,7 +1359,7 @@ const getEventDetails = async (query) => {
             'checked_in_at',
             'created_at',
           ],
-          where: Registrationwhere,
+          where: registrationWhere,
           required: false,
           include: [
             {
@@ -1351,14 +1379,12 @@ const getEventDetails = async (query) => {
         },
       ],
       limit: Number(limit),
-      offset: Number(offset),
-
+      offset,
       distinct: true,
-
       order: [[sortBy, sortOrder]],
     });
 
-    const total_registrations = await Registration.findAll({
+    const totalRegistrations = await Registration.findAll({
       include: [
         {
           model: Ticket,
@@ -1377,7 +1403,7 @@ const getEventDetails = async (query) => {
       paranoid: false,
     });
 
-    const registrations_paymentStatus = await Registration.findAll({
+    const registrationsPaymentStatus = await Registration.findAll({
       include: [
         {
           model: Ticket,
@@ -1396,7 +1422,7 @@ const getEventDetails = async (query) => {
       paranoid: false,
     });
 
-    const total_revenue = await Registration.findAll({
+    const totalRevenue = await Registration.findAll({
       include: [
         {
           model: Ticket,
@@ -1415,10 +1441,10 @@ const getEventDetails = async (query) => {
       paranoid: false,
     });
 
-    const checked_in_count = await Registration.count({
+    const checkedInCount = await Registration.count({
       where: {
         checked_in_at: {
-          [Op.not]: null,
+          [Op.ne]: null,
         },
       },
       include: [
@@ -1434,33 +1460,35 @@ const getEventDetails = async (query) => {
       paranoid: false,
     });
 
-    return {
-      message: 'Event details fetched successfully.',
-      data: {
-        event: eventData,
-        tickets,
-
-        registration_summary: {
-          total: total_registrations,
-          payment_status: registrations_paymentStatus,
-        },
-
-        revenue: {
-          total: total_revenue,
-        },
-
-        checkins: {
-          checked_in: checked_in_count,
-        },
-
-        pagination: {
-          totalRows: count,
-          page: Number(page),
-          limit: Number(limit),
-          totalPages: Math.ceil(count / limit),
-        },
+    const data = {
+      event: eventData,
+      tickets,
+      registration_summary: {
+        total: totalRegistrations,
+        payment_status: registrationsPaymentStatus,
+      },
+      revenue: {
+        total: totalRevenue,
+      },
+      checkins: {
+        checked_in: checkedInCount,
+      },
+      pagination: {
+        totalRows: count,
+        page: Number(page),
+        limit: Number(limit),
+        totalPages: Math.ceil(count / Number(limit)),
       },
     };
+
+    const response = {
+      message: 'Event details fetched successfully.',
+      data,
+    };
+
+    await redis.set(cacheKey, JSON.stringify(response));
+
+    return response;
   } catch (err) {
     console.log('Get event details error:', err);
     throw err;
@@ -1528,6 +1556,7 @@ const editProfileDetails = async (userId, body) => {
     throw err;
   }
 };
+
 const uploadReplaceEventBannerFile = async (
   userId,
   event,
@@ -1579,6 +1608,8 @@ const uploadReplaceEventBannerFile = async (
         }
       }
 
+      await redis.del(`event:${event.id}`);
+
       const { secureIo } = getIO();
 
       secureIo.to('admin_dashboard').emit('admin_dashboard_update', {
@@ -1606,6 +1637,8 @@ const uploadReplaceEventBannerFile = async (
       event_id: event.id,
       filename: file.filename,
     });
+
+    await redis.del(`event:${event.id}`);
 
     const { secureIo } = getIO();
 
@@ -1666,6 +1699,8 @@ const deleteEventBannerFile = async (eventId, bannerId) => {
     }
 
     await banner.destroy();
+
+    await redis.del(`event:${event.id}`);
 
     return true;
   } catch (error) {

@@ -39,13 +39,9 @@ const destroyEvent = async (req, res, next) => {
   try {
     const data = await organizerService.destroyEvent(req.user.id, req.query);
 
-    return success(
-      res,
-      STATUS_CODES.OK,
-      data.message,
-      MODULES.EVENT,
-      data.data,
-    );
+    return success(res, STATUS_CODES.OK, data.message, MODULES.EVENT, {
+      id: data.id,
+    });
   } catch (error) {
     next(error);
   }
