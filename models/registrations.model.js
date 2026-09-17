@@ -87,6 +87,12 @@ module.exports = (sequelize, DataTypes) => {
         defaultValue: 'pending',
       },
 
+      stripe_payment_intent_id: {
+        type: DataTypes.STRING(100),
+        allowNull: true,
+        unique: true,
+      },
+
       checked_in_at: {
         type: DataTypes.DATE,
         allowNull: true,

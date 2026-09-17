@@ -1,16 +1,11 @@
 const result = require('dotenv').config();
 
 const express = require('express');
-
 const app = express();
 
 const path = require('path');
-
 const http = require('http');
-
 const cookieParser = require('cookie-parser');
-
-const router = require('express').Router();
 
 const connectDB = require('./config/connectDB');
 const sequelize = require('./config/db');
@@ -18,11 +13,33 @@ const sequelize = require('./config/db');
 const { swaggerUi, swaggerSpec } = require('./config/swagger');
 
 const errorHandler = require('./middleware/error.middleware');
-
 const morganMiddleware = require('./config/morgan');
 
+const stripe = require('./config/stripe');
+const { stripeWebhook } = require('./controller/payment.controller');
+
+stripe.balance
+  .retrieve()
+  .then((balance) => {
+    console.log('STRIPE CONNECTED');
+    console.log(balance.available);
+  })
+  .catch((error) => {
+    console.error('STRIPE ERROR:', error.message);
+  });
+
 app.use(cookieParser());
+
+console.log('STRIPE ACCOUNT:', stripe);
+
+app.post(
+  '/api/v1/payment/webhook',
+  express.raw({ type: 'application/json' }), //express.raw() is used because Stripe webhook signature verification needs the exact original request body
+  stripeWebhook,
+);
+
 app.use(express.json());
+
 app.use(express.urlencoded({ extended: true }));
 
 app.use(morganMiddleware);
@@ -47,20 +64,6 @@ app.use('/api/v1/notification/', notificationRouter);
 
 app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
 
-// const crypto = require('crypto');
-// const key = crypto.randomBytes(32);
-// console.log(key.toString('hex'));
-
-router.get('/', (_req, res) => {
-  res
-    .status(200)
-    .json({ status: 'success', message: 'API Server is up and running!' });
-});
-
-app.use('/', router);
-
-const PORT = process.env.PORT;
-
 const { initializeSocket } = require('./socket');
 
 const server = http.createServer(app);
@@ -68,10 +71,6 @@ const server = http.createServer(app);
 initializeSocket(server);
 
 server.listen(3000);
-
-// app.listen(PORT, () => {
-//   console.log(`Server running on port ${PORT}`);
-// });
 
 sequelize
   .authenticate()
@@ -83,9 +82,7 @@ sequelize
     console.log('Tables Synced');
 
     await initializeEventScheduler();
-
     await initializeEventTasks();
-
     await startWaitlistScheduler();
   })
   .catch((err) => {
@@ -97,5 +94,3 @@ app.use((req, res) => {
 });
 
 app.use(errorHandler);
-
-//Both express and socket use same server and port

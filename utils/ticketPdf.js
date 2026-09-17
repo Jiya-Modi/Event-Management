@@ -141,7 +141,7 @@ const generateTicketPdf = async (ticketData) => {
               Price:
             </span>
 
-            ₹${ticketData.ticketPrice}
+            ₹${ticketData.ticketPrice} * ${ticketData.quantity}
           </div>
 
           <div class="qr">

@@ -1,5 +1,6 @@
 const sequelize = require('../config/db');
 const redis = require('../config/redis');
+const stripe = require('../config/stripe');
 
 const {
   User,
@@ -184,6 +185,280 @@ const registerEventTicket = async (userId, body) => {
   }
 };
 
+// const payTicket = async (userId, body) => {
+//   const transaction = await sequelize.transaction();
+
+//   try {
+//     const { registration_id } = body;
+
+//     const user = await User.findOne({
+//       where: {
+//         id: userId,
+//       },
+//       attributes: {
+//         include: [
+//           [
+//             literal(
+//               `pgp_sym_decrypt("email", '${process.env.ENCRYPTION_KEY}')`,
+//             ),
+//             'decrypted_email',
+//           ],
+//         ],
+//       },
+//       transaction,
+//     });
+
+//     if (!user) {
+//       const error = new Error(getMessage(Messages.NOT_FOUND, MODULES.USER));
+
+//       error.statusCode = STATUS_CODES.NOT_FOUND;
+//       throw error;
+//     }
+
+//     const decrypted_email = user.get('decrypted_email');
+
+//     const registration = await Registration.findOne({
+//       where: {
+//         registration_id,
+//         user_id: userId,
+//       },
+//       include: [
+//         {
+//           model: Ticket,
+//           as: 'ticket',
+//           include: [
+//             {
+//               model: Event,
+//               as: 'event',
+//             },
+//           ],
+//         },
+//       ],
+//       transaction,
+//     });
+
+//     if (!registration) {
+//       const error = new Error(
+//         getMessage(Messages.NOT_FOUND, MODULES.REGISTRATION),
+//       );
+
+//       error.statusCode = STATUS_CODES.NOT_FOUND;
+//       throw error;
+//     }
+
+//     if (registration.payment_status === PAYMENT_STATUS.PAID) {
+//       const error = new Error(
+//         getMessage(Messages.PAYMENT_ALREADY_COMPLETED, MODULES.TICKET),
+//       );
+
+//       error.statusCode = STATUS_CODES.BAD_REQUEST;
+//       throw error;
+//     }
+
+//     const ticket = registration.ticket;
+//     const event = ticket?.event;
+
+//     if (!ticket) {
+//       const error = new Error(getMessage(Messages.NOT_FOUND, MODULES.TICKET));
+
+//       error.statusCode = STATUS_CODES.NOT_FOUND;
+//       throw error;
+//     }
+
+//     if (!event) {
+//       const error = new Error(getMessage(Messages.NOT_FOUND, MODULES.EVENT));
+
+//       error.statusCode = STATUS_CODES.NOT_FOUND;
+//       throw error;
+//     }
+
+//     const currentDateTime = new Date();
+//     const startDate = new Date(event.start_date);
+
+//     const minimumDifference = 48 * 60 * 60 * 1000;
+
+//     const difference = startDate.getTime() - currentDateTime.getTime();
+
+//     if (difference < minimumDifference) {
+//       const error = new Error('Payment can be done before 48 hours');
+
+//       error.statusCode = STATUS_CODES.BAD_REQUEST;
+//       throw error;
+//     }
+
+//     const registrationCount = await Registration.sum('quantity', {
+//       where: {
+//         ticket_id: ticket.id,
+//         status: REGISTRATION_STATUS.REGISTERED,
+//         payment_status: PAYMENT_STATUS.PAID,
+//       },
+//       transaction,
+//     });
+
+//     const totalRegistered = registrationCount || 0;
+
+//     const quantity = registration.quantity;
+
+//     const amount = quantity * Number(ticket.price);
+
+//     if (totalRegistered + quantity > ticket.registration_limit) {
+//       const waitlistCount = await Registration.sum('quantity', {
+//         where: {
+//           ticket_id: ticket.id,
+//           status: REGISTRATION_STATUS.WAITLIST,
+//         },
+//         transaction,
+//       });
+
+//       const totalWaitlist = waitlistCount || 0;
+
+//       if (totalWaitlist + quantity > ticket.waitlist_limit) {
+//         const error = new Error(
+//           getMessage(Messages.WAITLIST_LIMIT_REACHED, MODULES.REGISTRATION),
+//         );
+
+//         error.statusCode = STATUS_CODES.BAD_REQUEST;
+//         throw error;
+//       }
+
+//       await registration.update(
+//         {
+//           payment_status: PAYMENT_STATUS.PAID,
+//           status: REGISTRATION_STATUS.WAITLIST,
+//         },
+//         {
+//           transaction,
+//         },
+//       );
+
+//       await transaction.commit();
+
+//       await redis.del(`event:${event.id}`);
+
+//       await generateAuditlog({
+//         action_by: userId,
+//         entity_id: registration.id,
+//         action: AUDIT_ACTIONS.UPDATE,
+//         module: AUDIT_MODULES.REGISTRATION,
+
+//         values: {
+//           oldvalue: {
+//             reg_id: registration.id,
+//             ticket_id: ticket.id,
+//             user_id: userId,
+//             registration_id: registration.registration_id,
+//             quantity,
+//             amount,
+//             status: REGISTRATION_STATUS.REGISTERED,
+//             payment_status: PAYMENT_STATUS.PENDING,
+//           },
+
+//           newvalue: {
+//             reg_id: registration.id,
+//             ticket_id: ticket.id,
+//             user_id: userId,
+//             registration_id: registration.registration_id,
+//             quantity,
+//             amount,
+//             status: REGISTRATION_STATUS.WAITLIST,
+//             payment_status: PAYMENT_STATUS.PAID,
+//           },
+//         },
+//       });
+
+//       return {
+//         message: 'Ticket is full. User added to waitlist.',
+//         data: registration,
+//       };
+//     }
+
+//     await registration.update(
+//       {
+//         payment_status: PAYMENT_STATUS.PAID,
+//       },
+//       {
+//         transaction,
+//       },
+//     );
+
+//     await generateAuditlog({
+//       action_by: userId,
+//       entity_id: registration.id,
+//       action: AUDIT_ACTIONS.UPDATE,
+//       module: AUDIT_MODULES.REGISTRATION,
+
+//       values: {
+//         oldvalue: {
+//           reg_id: registration.id,
+//           ticket_id: ticket.id,
+//           user_id: userId,
+//           quantity,
+//           amount,
+//           status: REGISTRATION_STATUS.REGISTERED,
+//           payment_status: PAYMENT_STATUS.PENDING,
+//         },
+
+//         newvalue: {
+//           reg_id: registration.id,
+//           ticket_id: ticket.id,
+//           user_id: userId,
+//           quantity,
+//           amount,
+//           status: REGISTRATION_STATUS.REGISTERED,
+//           payment_status: PAYMENT_STATUS.PAID,
+//         },
+//       },
+//     });
+
+//     await transaction.commit();
+
+//     // await redis.del(`organizer:${userId}`);
+
+//     await redis.del(`user-dashboard`);
+
+//     const qrBuffer = await generateQRCode(
+//       registration.registration_id,
+//       quantity,
+//     );
+
+//     const ticketData = {
+//       eventTitle: event.title,
+//       registrationId: registration.registration_id,
+//       userName: user.name,
+//       email: decrypted_email,
+//       eventDate: event.start_date,
+//       location: event.address,
+//       quantity,
+//       ticketName: ticket.name,
+//       ticketPrice: ticket.price,
+//       qrBuffer,
+//     };
+
+//     const pdfBuffer = await generateTicketPdf(ticketData);
+
+//     await sendTicketMail({
+//       email: decrypted_email,
+//       name: user.name,
+//       eventName: event.title,
+//       registration_id: registration.registration_id,
+//       pdfBuffer,
+//     });
+
+//     return {
+//       message: 'Payment completed successfully.',
+//       data: registration,
+//     };
+//   } catch (error) {
+//     if (!transaction.finished) {
+//       await transaction.rollback();
+//     }
+
+//     console.log('PAYMENT ERROR:', error);
+
+//     throw error;
+//   }
+// };
+
 const payTicket = async (userId, body) => {
   const transaction = await sequelize.transaction();
 
@@ -191,9 +466,7 @@ const payTicket = async (userId, body) => {
     const { registration_id } = body;
 
     const user = await User.findOne({
-      where: {
-        id: userId,
-      },
+      where: { id: userId },
       attributes: {
         include: [
           [
@@ -209,7 +482,6 @@ const payTicket = async (userId, body) => {
 
     if (!user) {
       const error = new Error(getMessage(Messages.NOT_FOUND, MODULES.USER));
-
       error.statusCode = STATUS_CODES.NOT_FOUND;
       throw error;
     }
@@ -240,7 +512,6 @@ const payTicket = async (userId, body) => {
       const error = new Error(
         getMessage(Messages.NOT_FOUND, MODULES.REGISTRATION),
       );
-
       error.statusCode = STATUS_CODES.NOT_FOUND;
       throw error;
     }
@@ -249,7 +520,6 @@ const payTicket = async (userId, body) => {
       const error = new Error(
         getMessage(Messages.PAYMENT_ALREADY_COMPLETED, MODULES.TICKET),
       );
-
       error.statusCode = STATUS_CODES.BAD_REQUEST;
       throw error;
     }
@@ -259,28 +529,23 @@ const payTicket = async (userId, body) => {
 
     if (!ticket) {
       const error = new Error(getMessage(Messages.NOT_FOUND, MODULES.TICKET));
-
       error.statusCode = STATUS_CODES.NOT_FOUND;
       throw error;
     }
 
     if (!event) {
       const error = new Error(getMessage(Messages.NOT_FOUND, MODULES.EVENT));
-
       error.statusCode = STATUS_CODES.NOT_FOUND;
       throw error;
     }
 
     const currentDateTime = new Date();
     const startDate = new Date(event.start_date);
-
     const minimumDifference = 48 * 60 * 60 * 1000;
-
     const difference = startDate.getTime() - currentDateTime.getTime();
 
     if (difference < minimumDifference) {
       const error = new Error('Payment can be done before 48 hours');
-
       error.statusCode = STATUS_CODES.BAD_REQUEST;
       throw error;
     }
@@ -296,9 +561,13 @@ const payTicket = async (userId, body) => {
 
     const totalRegistered = registrationCount || 0;
 
-    const quantity = registration.quantity;
+    const quantity = Number(registration.quantity);
+    const ticketPrice = Number(ticket.price);
 
-    const amount = quantity * Number(ticket.price);
+    const totalAmountInRupees = quantity * ticketPrice;
+    const amount = Math.round(totalAmountInRupees * 100);
+
+    let registrationStatus = REGISTRATION_STATUS.REGISTERED;
 
     if (totalRegistered + quantity > ticket.registration_limit) {
       const waitlistCount = await Registration.sum('quantity', {
@@ -315,137 +584,56 @@ const payTicket = async (userId, body) => {
         const error = new Error(
           getMessage(Messages.WAITLIST_LIMIT_REACHED, MODULES.REGISTRATION),
         );
-
         error.statusCode = STATUS_CODES.BAD_REQUEST;
         throw error;
       }
 
-      await registration.update(
-        {
-          payment_status: PAYMENT_STATUS.PAID,
-          status: REGISTRATION_STATUS.WAITLIST,
-        },
-        {
-          transaction,
-        },
-      );
-
-      await transaction.commit();
-
-      await redis.del(`event:${event.id}`);
-
-      await generateAuditlog({
-        action_by: userId,
-        entity_id: registration.id,
-        action: AUDIT_ACTIONS.UPDATE,
-        module: AUDIT_MODULES.REGISTRATION,
-
-        values: {
-          oldvalue: {
-            reg_id: registration.id,
-            ticket_id: ticket.id,
-            user_id: userId,
-            registration_id: registration.registration_id,
-            quantity,
-            amount,
-            status: REGISTRATION_STATUS.REGISTERED,
-            payment_status: PAYMENT_STATUS.PENDING,
-          },
-
-          newvalue: {
-            reg_id: registration.id,
-            ticket_id: ticket.id,
-            user_id: userId,
-            registration_id: registration.registration_id,
-            quantity,
-            amount,
-            status: REGISTRATION_STATUS.WAITLIST,
-            payment_status: PAYMENT_STATUS.PAID,
-          },
-        },
-      });
-
-      return {
-        message: 'Ticket is full. User added to waitlist.',
-        data: registration,
-      };
+      registrationStatus = REGISTRATION_STATUS.WAITLIST;
     }
+
+    console.log('PAYMENT DETAILS:', {
+      ticketPrice,
+      quantity,
+      totalAmountInRupees,
+      stripeAmountInPaise: amount,
+    });
+
+    const paymentIntent = await stripe.paymentIntents.create({
+      amount,
+      currency: 'inr',
+      automatic_payment_methods: {
+        enabled: true,
+        allow_redirects: 'never',
+      },
+      metadata: {
+        registration_id: registration.registration_id,
+        user_id: userId,
+        ticket_id: ticket.id,
+      },
+    });
 
     await registration.update(
       {
-        payment_status: PAYMENT_STATUS.PAID,
+        stripe_payment_intent_id: paymentIntent.id,
+        status: registrationStatus,
       },
-      {
-        transaction,
-      },
+      { transaction },
     );
-
-    await generateAuditlog({
-      action_by: userId,
-      entity_id: registration.id,
-      action: AUDIT_ACTIONS.UPDATE,
-      module: AUDIT_MODULES.REGISTRATION,
-
-      values: {
-        oldvalue: {
-          reg_id: registration.id,
-          ticket_id: ticket.id,
-          user_id: userId,
-          quantity,
-          amount,
-          status: REGISTRATION_STATUS.REGISTERED,
-          payment_status: PAYMENT_STATUS.PENDING,
-        },
-
-        newvalue: {
-          reg_id: registration.id,
-          ticket_id: ticket.id,
-          user_id: userId,
-          quantity,
-          amount,
-          status: REGISTRATION_STATUS.REGISTERED,
-          payment_status: PAYMENT_STATUS.PAID,
-        },
-      },
-    });
 
     await transaction.commit();
 
-    // await redis.del(`organizer:${userId}`);
-
-    await redis.del(`user-dashboard`);
-
-    const qrBuffer = await generateQRCode(
-      registration.registration_id,
-      quantity,
-    );
-
-    const ticketData = {
-      eventTitle: event.title,
-      registrationId: registration.registration_id,
-      userName: user.name,
-      email: decrypted_email,
-      eventDate: event.start_date,
-      location: event.address,
-      quantity,
-      ticketName: ticket.name,
-      ticketPrice: ticket.price,
-      qrBuffer,
-    };
-
-    const pdfBuffer = await generateTicketPdf(ticketData);
-
-    await sendTicketMail({
-      email: decrypted_email,
-      name: user.name,
-      eventName: event.title,
-      registration_id: registration.registration_id,
-      pdfBuffer,
-    });
+    await redis.del(`event:${event.id}`);
 
     return {
-      message: 'Payment completed successfully.',
-      data: registration,
+      message: 'Payment initiated.',
+      data: {
+        registration_id: registration.registration_id,
+        payment_intent_id: paymentIntent.id,
+        client_secret: paymentIntent.client_secret,
+        status: paymentIntent.status,
+        registration_status: registrationStatus,
+        amount: totalAmountInRupees,
+      },
     };
   } catch (error) {
     if (!transaction.finished) {
@@ -453,7 +641,6 @@ const payTicket = async (userId, body) => {
     }
 
     console.log('PAYMENT ERROR:', error);
-
     throw error;
   }
 };
@@ -1864,3 +2051,6 @@ module.exports = {
 //user cancel - 24 hours before start date
 //event cancel - 72 hours before start date
 //pay ticket - 48 hours before start date
+
+//Stripe webhooks allow my backend to reliably receive server-to-server payment events from Stripe,
+// so I don't depend on the customer's browser returning to my application to confirm or fulfill a payment.
