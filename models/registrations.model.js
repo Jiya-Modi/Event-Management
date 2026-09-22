@@ -20,6 +20,11 @@ module.exports = (sequelize, DataTypes) => {
         sourceKey: 'id',
         as: 'partialregistrations',
       });
+
+      Registration.hasOne(models.PaymentTransaction, {
+        foreignKey: 'reg_id',
+        as: 'payment_transaction',
+      });
     }
   }
 
@@ -85,12 +90,6 @@ module.exports = (sequelize, DataTypes) => {
         ),
         allowNull: false,
         defaultValue: 'pending',
-      },
-
-      stripe_payment_intent_id: {
-        type: DataTypes.STRING(100),
-        allowNull: true,
-        unique: true,
       },
 
       checked_in_at: {

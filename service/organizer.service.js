@@ -3,10 +3,7 @@ const redis = require('../config/redis');
 
 const fs = require('fs/promises');
 const path = require('path');
-
-//const emailQueue = require('../queues/emailQueue');
-
-const emailQueue = require('../queues/bullmq.emailQueue');
+const stripe = require('../config/stripe');
 
 const {
   User,
@@ -17,6 +14,7 @@ const {
   EventCategory,
   PartialRegistration,
   EventBanner,
+  PaymentTransaction,
 } = require('../models');
 
 const {
@@ -50,6 +48,8 @@ const { sendNotification } = require('./fcm.service');
 const { generateAuditlog } = require('./auditlogs.service');
 
 const { getIO } = require('../socket');
+
+const refundQueue = require('../queues/bullmq.refundQueue');
 
 const addEditEvent = async (userId, body) => {
   const transaction = await sequelize.transaction();
@@ -552,6 +552,7 @@ const destroyEvent = async (userId, query) => {
         'status',
         'start_date',
         'address',
+        'city',
         'created_by',
       ],
       transaction,
@@ -599,10 +600,8 @@ const destroyEvent = async (userId, query) => {
 
     const ticketIds = tickets.map((ticket) => ticket.id);
 
-    let emails = [];
     let userIds = [];
     let registrations = [];
-    let userEmails = [];
 
     const allowedRegistrationStatus = [
       REGISTRATION_STATUS.REGISTERED,
@@ -637,16 +636,12 @@ const destroyEvent = async (userId, query) => {
         transaction,
       });
 
-      emails = registrations
-        .filter((registration) => registration.user?.email)
-        .map((registration) => ({
-          email: registration.user.email,
-        }));
-
-      userEmails = [...new Set(emails.map((item) => item.email))];
-
       userIds = [
-        ...new Set(registrations.map((registration) => registration.user_id)),
+        ...new Set(
+          registrations
+            .map((registration) => registration.user_id)
+            .filter(Boolean),
+        ),
       ];
     }
 
@@ -655,6 +650,7 @@ const destroyEvent = async (userId, query) => {
     );
 
     let partialRegistrations = [];
+    let paymentTransactions = [];
 
     if (registrationIds.length > 0) {
       partialRegistrations = await PartialRegistration.findAll({
@@ -665,13 +661,23 @@ const destroyEvent = async (userId, query) => {
         },
         transaction,
       });
+
+      paymentTransactions = await PaymentTransaction.findAll({
+        where: {
+          reg_id: {
+            [Op.in]: registrationIds,
+          },
+          status: PAYMENT_STATUS.PAID,
+        },
+        transaction,
+      });
     }
 
     if (registrationIds.length > 0) {
       await Registration.update(
         {
           status: REGISTRATION_STATUS.CANCELLED,
-          payment_status: PAYMENT_STATUS.REFUNDED,
+          payment_status: PAYMENT_STATUS.REFUND_PENDING,
         },
         {
           where: {
@@ -701,7 +707,7 @@ const destroyEvent = async (userId, query) => {
             newvalue: {
               id: registration.id,
               status: REGISTRATION_STATUS.CANCELLED,
-              payment_status: PAYMENT_STATUS.REFUNDED,
+              payment_status: PAYMENT_STATUS.REFUND_PENDING,
             },
           },
           transaction,
@@ -746,78 +752,6 @@ const destroyEvent = async (userId, query) => {
           });
         }
       }
-
-      if (partialRegistrations.length > 0) {
-        await PartialRegistration.destroy({
-          where: {
-            id: {
-              [Op.in]: partialRegistrations.map(
-                (partialRegistration) => partialRegistration.id,
-              ),
-            },
-          },
-          transaction,
-        });
-
-        for (const partialRegistration of partialRegistrations) {
-          await generateAuditlog({
-            action_by: userId,
-            entity_id: partialRegistration.id,
-            action: AUDIT_ACTIONS.DELETE,
-            module: AUDIT_MODULES.PARTIAL_REGISTRATION,
-            values: {
-              oldvalue: {
-                id: partialRegistration.id,
-                reg_id: partialRegistration.reg_id,
-                status: PARTIAL_REGISTRATION_STATUS.REFUND,
-              },
-              newvalue: {},
-            },
-            transaction,
-          });
-        }
-      }
-
-      await Registration.destroy({
-        where: {
-          id: {
-            [Op.in]: registrationIds,
-          },
-        },
-        transaction,
-      });
-
-      const { secureIo } = getIO();
-
-      secureIo.to('admin_dashboard').emit('admin_dashboard_update', {
-        type: 'REGISTRATION_DELETED',
-      });
-
-      secureIo
-        .to(`organizer_${event.created_by}`)
-        .emit('organizer_dashboard_update', {
-          type: 'REGISTRATION_DELETED',
-        });
-
-      for (const registration of registrations) {
-        await generateAuditlog({
-          action_by: userId,
-          entity_id: registration.id,
-          action: AUDIT_ACTIONS.DELETE,
-          module: AUDIT_MODULES.REGISTRATION,
-          values: {
-            oldvalue: {
-              id: registration.id,
-              ticket_id: registration.ticket_id,
-              user_id: registration.user_id,
-              status: REGISTRATION_STATUS.CANCELLED,
-              payment_status: PAYMENT_STATUS.REFUNDED,
-            },
-            newvalue: {},
-          },
-          transaction,
-        });
-      }
     }
 
     if (tickets.length > 0) {
@@ -829,18 +763,6 @@ const destroyEvent = async (userId, query) => {
         },
         transaction,
       });
-
-      const { secureIo } = getIO();
-
-      secureIo.to('admin_dashboard').emit('admin_dashboard_update', {
-        type: 'TICKET_DELETED',
-      });
-
-      secureIo
-        .to(`organizer_${event.created_by}`)
-        .emit('organizer_dashboard_update', {
-          type: 'TICKET_DELETED',
-        });
 
       for (const ticket of tickets) {
         await generateAuditlog({
@@ -883,7 +805,27 @@ const destroyEvent = async (userId, query) => {
       transaction,
     });
 
+    await event.destroy({
+      transaction,
+    });
+
+    await transaction.commit();
+
+    await redis.del(`event:${event.id}`);
+
     const { secureIo } = getIO();
+
+    if (tickets.length > 0) {
+      secureIo.to('admin_dashboard').emit('admin_dashboard_update', {
+        type: 'TICKET_DELETED',
+      });
+
+      secureIo
+        .to(`organizer_${event.created_by}`)
+        .emit('organizer_dashboard_update', {
+          type: 'TICKET_DELETED',
+        });
+    }
 
     secureIo.to('admin_dashboard').emit('admin_dashboard_update', {
       type: 'EVENT_DELETED',
@@ -895,21 +837,22 @@ const destroyEvent = async (userId, query) => {
         type: 'EVENT_DELETED',
       });
 
-    await event.destroy({
-      transaction,
-    });
-
-    await transaction.commit();
-
-    await redis.del(`event:${event.id}`);
-
-    if (userEmails.length > 0) {
-      for (const user of userEmails) {
-        await emailQueue.add('event-cancellation-email', {
-          user,
-          event,
-        });
-      }
+    for (const paymentTransaction of paymentTransactions) {
+      await refundQueue.add(
+        'process-refund',
+        {
+          paymentTransactionId: paymentTransaction.id,
+        },
+        {
+          attempts: 3,
+          backoff: {
+            type: 'exponential',
+            delay: 5000,
+          },
+          removeOnComplete: true,
+          removeOnFail: false,
+        },
+      );
     }
 
     if (userIds.length > 0) {
@@ -1746,3 +1689,77 @@ module.exports = {
 //      │
 //      ▼
 // SMTP / Brevo / etc.
+
+// Organizer
+//    │
+//    │ Cancel Event
+//    ▼
+// destroyEvent()
+//    │
+//    ▼
+// Find PAID registrations
+//    │
+//    ▼
+// Find payment_transactions
+//    │
+//    │ payment_intent_id
+//    ▼
+// Stripe Refund API
+//    │
+//    │ stripe.refunds.create()
+//    ▼
+// Stripe
+//    │
+//    │ refund processed
+//    ▼
+// charge.refunded webhook
+//    │
+//    ▼
+// stripeWebhook()
+//    │
+//    ├── Find PaymentTransaction
+//    │
+//    ├── status = REFUNDED
+//    │
+//    └── Registration.payment_status = REFUNDED
+
+////////////////////////////////////////////////////////
+
+// destroyEvent()
+//      │
+//      ├── Registration → CANCELLED
+//      ├── Payment → REFUND_PENDING
+//      ├── Event → soft deleted
+//      │
+//      └── emailQueue
+//              │
+//              │ process-refund
+//              ▼
+//        Refund Worker
+//              │
+//              ▼
+//     stripe.refunds.create()
+//              │
+//              ▼
+//           Stripe
+//              │
+//              │ charge.refunded
+//              ▼
+//        Stripe Webhook
+//              │
+//              ├── PaymentTransaction → refunded
+//              │
+//              ├── Registration → REFUNDED
+//              │
+//              ├── fetch User
+//              │
+//              ├── fetch soft-deleted Event
+//              │
+//              └── emailQueue
+//                     │
+//                     │ event-cancellation-email
+//                     ▼
+//                 Email Worker
+//                     │
+//                     ▼
+//           sendEventCancellationMail()

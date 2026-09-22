@@ -57,12 +57,6 @@ module.exports = {
         },
       },
 
-      stripe_payment_intent_id: {
-        type: Sequelize.STRING(100),
-        allowNull: true,
-        unique: true,
-      },
-
       status: {
         type: Sequelize.ENUM(
           'registered',
@@ -80,6 +74,7 @@ module.exports = {
           'failed',
           'refunded',
           'partial_refund',
+          'refund_pending',
         ),
         allowNull: false,
         defaultValue: 'pending',

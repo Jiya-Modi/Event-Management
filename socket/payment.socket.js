@@ -354,7 +354,6 @@ const registerPaymentSocket = (secureIo, socket) => {
           },
 
           removeOnComplete: true,
-
           removeOnFail: false,
         },
       );

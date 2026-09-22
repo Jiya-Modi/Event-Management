@@ -97,9 +97,9 @@ class EmailQueue {
   }
 }
 
-const emailQueue = new EmailQueue();
+// const emailQueue = new EmailQueue();
 
-module.exports = emailQueue;
+// module.exports = emailQueue;
 
 //unshift() -> adds one or more element to the queue in front
 // The Event Service creates the email task, and the EmailQueue class manages when and how that task is executed.

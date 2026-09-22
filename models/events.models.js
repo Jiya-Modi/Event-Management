@@ -34,6 +34,11 @@ module.exports = (sequelize, DataTypes) => {
         foreignKey: 'event_id',
         as: 'banners',
       });
+
+      Event.hasMany(models.PaymentTransaction, {
+        foreignKey: 'event_id',
+        as: 'payment_transactions',
+      });
     }
   }
 

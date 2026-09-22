@@ -500,6 +500,15 @@ const addOrganizer = async (userId, body) => {
       {
         user,
       },
+      {
+        attempts: 3,
+        backoff: {
+          type: 'exponential',
+          delay: 5000,
+        },
+        removeOnComplete: true,
+        removeOnFail: false,
+      },
     );
 
     const payload = {

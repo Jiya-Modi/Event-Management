@@ -102,22 +102,22 @@ const registerEventTicket = async (userId, body) => {
       throw error;
     }
 
-    const existingRegistration = await Registration.findOne({
-      where: {
-        user_id: userId,
-        ticket_id,
-        quantity,
-      },
-      transaction,
-    });
+    // const existingRegistration = await Registration.findOne({
+    //   where: {
+    //     user_id: userId,
+    //     ticket_id,
+    //     quantity,
+    //   },
+    //   transaction,
+    // });
 
-    if (existingRegistration) {
-      const error = new Error(
-        getMessage(Messages.ALREADY_REGISTERED, MODULES.USER),
-      );
-      error.statusCode = STATUS_CODES.BAD_REQUEST;
-      throw error;
-    }
+    // if (existingRegistration) {
+    //   const error = new Error(
+    //     getMessage(Messages.ALREADY_REGISTERED, MODULES.USER),
+    //   );
+    //   error.statusCode = STATUS_CODES.BAD_REQUEST;
+    //   throw error;
+    // }
 
     const registrationNumber = generateRegistrationNumber();
 
@@ -459,12 +459,197 @@ const registerEventTicket = async (userId, body) => {
 //   }
 // };
 
+// const payTicket = async (userId, body) => {
+//   const transaction = await sequelize.transaction();
+
+//   try {
+//     const { registration_id } = body;
+
+//     const user = await User.findOne({
+//       where: { id: userId },
+//       attributes: {
+//         include: [
+//           [
+//             literal(
+//               `pgp_sym_decrypt("email", '${process.env.ENCRYPTION_KEY}')`,
+//             ),
+//             'decrypted_email',
+//           ],
+//         ],
+//       },
+//       transaction,
+//     });
+
+//     if (!user) {
+//       const error = new Error(getMessage(Messages.NOT_FOUND, MODULES.USER));
+//       error.statusCode = STATUS_CODES.NOT_FOUND;
+//       throw error;
+//     }
+
+//     const decrypted_email = user.get('decrypted_email');
+
+//     const registration = await Registration.findOne({
+//       where: {
+//         registration_id,
+//         user_id: userId,
+//       },
+//       include: [
+//         {
+//           model: Ticket,
+//           as: 'ticket',
+//           include: [
+//             {
+//               model: Event,
+//               as: 'event',
+//             },
+//           ],
+//         },
+//       ],
+//       transaction,
+//     });
+
+//     if (!registration) {
+//       const error = new Error(
+//         getMessage(Messages.NOT_FOUND, MODULES.REGISTRATION),
+//       );
+//       error.statusCode = STATUS_CODES.NOT_FOUND;
+//       throw error;
+//     }
+
+//     if (registration.payment_status === PAYMENT_STATUS.PAID) {
+//       const error = new Error(
+//         getMessage(Messages.PAYMENT_ALREADY_COMPLETED, MODULES.TICKET),
+//       );
+//       error.statusCode = STATUS_CODES.BAD_REQUEST;
+//       throw error;
+//     }
+
+//     const ticket = registration.ticket;
+//     const event = ticket?.event;
+
+//     if (!ticket) {
+//       const error = new Error(getMessage(Messages.NOT_FOUND, MODULES.TICKET));
+//       error.statusCode = STATUS_CODES.NOT_FOUND;
+//       throw error;
+//     }
+
+//     if (!event) {
+//       const error = new Error(getMessage(Messages.NOT_FOUND, MODULES.EVENT));
+//       error.statusCode = STATUS_CODES.NOT_FOUND;
+//       throw error;
+//     }
+
+//     const currentDateTime = new Date();
+//     const startDate = new Date(event.start_date);
+//     const minimumDifference = 48 * 60 * 60 * 1000;
+//     const difference = startDate.getTime() - currentDateTime.getTime();
+
+//     if (difference < minimumDifference) {
+//       const error = new Error('Payment can be done before 48 hours');
+//       error.statusCode = STATUS_CODES.BAD_REQUEST;
+//       throw error;
+//     }
+
+//     const registrationCount = await Registration.sum('quantity', {
+//       where: {
+//         ticket_id: ticket.id,
+//         status: REGISTRATION_STATUS.REGISTERED,
+//         payment_status: PAYMENT_STATUS.PAID,
+//       },
+//       transaction,
+//     });
+
+//     const totalRegistered = registrationCount || 0;
+
+//     const quantity = Number(registration.quantity);
+//     const ticketPrice = Number(ticket.price);
+
+//     const totalAmountInRupees = quantity * ticketPrice;
+//     const amount = Math.round(totalAmountInRupees * 100);
+
+//     let registrationStatus = REGISTRATION_STATUS.REGISTERED;
+
+//     if (totalRegistered + quantity > ticket.registration_limit) {
+//       const waitlistCount = await Registration.sum('quantity', {
+//         where: {
+//           ticket_id: ticket.id,
+//           status: REGISTRATION_STATUS.WAITLIST,
+//         },
+//         transaction,
+//       });
+
+//       const totalWaitlist = waitlistCount || 0;
+
+//       if (totalWaitlist + quantity > ticket.waitlist_limit) {
+//         const error = new Error(
+//           getMessage(Messages.WAITLIST_LIMIT_REACHED, MODULES.REGISTRATION),
+//         );
+//         error.statusCode = STATUS_CODES.BAD_REQUEST;
+//         throw error;
+//       }
+
+//       registrationStatus = REGISTRATION_STATUS.WAITLIST;
+//     }
+
+//     console.log('PAYMENT DETAILS:', {
+//       ticketPrice,
+//       quantity,
+//       totalAmountInRupees,
+//       stripeAmountInPaise: amount,
+//     });
+
+//     const paymentIntent = await stripe.paymentIntents.create({
+//       amount,
+//       currency: 'inr',
+//       automatic_payment_methods: {
+//         enabled: true,
+//         allow_redirects: 'never',
+//       },
+//       metadata: {
+//         registration_id: registration.registration_id,
+//         user_id: userId,
+//         ticket_id: ticket.id,
+//       },
+//     });
+
+//     await registration.update(
+//       {
+//         stripe_payment_intent_id: paymentIntent.id,
+//         status: registrationStatus,
+//       },
+//       { transaction },
+//     );
+
+//     await transaction.commit();
+
+//     await redis.del(`event:${event.id}`);
+
+//     return {
+//       message: 'Payment initiated.',
+//       data: {
+//         registration_id: registration.registration_id,
+//         payment_intent_id: paymentIntent.id,
+//         client_secret: paymentIntent.client_secret,
+//         status: paymentIntent.status,
+//         registration_status: registrationStatus,
+//         amount: totalAmountInRupees,
+//       },
+//     };
+//   } catch (error) {
+//     if (!transaction.finished) {
+//       await transaction.rollback();
+//     }
+
+//     console.log('PAYMENT ERROR:', error);
+//     throw error;
+//   }
+// };
+
 const payTicket = async (userId, body) => {
   const transaction = await sequelize.transaction();
 
   try {
     const { registration_id } = body;
-
     const user = await User.findOne({
       where: { id: userId },
       attributes: {
@@ -486,23 +671,13 @@ const payTicket = async (userId, body) => {
       throw error;
     }
 
-    const decrypted_email = user.get('decrypted_email');
-
     const registration = await Registration.findOne({
-      where: {
-        registration_id,
-        user_id: userId,
-      },
+      where: { registration_id, user_id: userId },
       include: [
         {
           model: Ticket,
           as: 'ticket',
-          include: [
-            {
-              model: Event,
-              as: 'event',
-            },
-          ],
+          include: [{ model: Event, as: 'event' }],
         },
       ],
       transaction,
@@ -526,7 +701,6 @@ const payTicket = async (userId, body) => {
 
     const ticket = registration.ticket;
     const event = ticket?.event;
-
     if (!ticket) {
       const error = new Error(getMessage(Messages.NOT_FOUND, MODULES.TICKET));
       error.statusCode = STATUS_CODES.NOT_FOUND;
@@ -560,21 +734,12 @@ const payTicket = async (userId, body) => {
     });
 
     const totalRegistered = registrationCount || 0;
-
     const quantity = Number(registration.quantity);
-    const ticketPrice = Number(ticket.price);
-
-    const totalAmountInRupees = quantity * ticketPrice;
-    const amount = Math.round(totalAmountInRupees * 100);
-
     let registrationStatus = REGISTRATION_STATUS.REGISTERED;
 
     if (totalRegistered + quantity > ticket.registration_limit) {
       const waitlistCount = await Registration.sum('quantity', {
-        where: {
-          ticket_id: ticket.id,
-          status: REGISTRATION_STATUS.WAITLIST,
-        },
+        where: { ticket_id: ticket.id, status: REGISTRATION_STATUS.WAITLIST },
         transaction,
       });
 
@@ -587,50 +752,52 @@ const payTicket = async (userId, body) => {
         error.statusCode = STATUS_CODES.BAD_REQUEST;
         throw error;
       }
-
       registrationStatus = REGISTRATION_STATUS.WAITLIST;
     }
 
-    console.log('PAYMENT DETAILS:', {
-      ticketPrice,
-      quantity,
-      totalAmountInRupees,
-      stripeAmountInPaise: amount,
-    });
+    const ticketPrice = Number(ticket.price);
+    const totalAmountInRupees = quantity * ticketPrice;
+    const amount = Math.round(totalAmountInRupees * 100);
 
-    const paymentIntent = await stripe.paymentIntents.create({
-      amount,
-      currency: 'inr',
-      automatic_payment_methods: {
-        enabled: true,
-        allow_redirects: 'never',
-      },
+    const session = await stripe.checkout.sessions.create({
+      mode: 'payment',
+      line_items: [
+        {
+          price_data: {
+            currency: 'inr',
+            product_data: { name: ticket.name },
+            unit_amount: Math.round(ticketPrice * 100),
+          },
+          quantity,
+        },
+      ],
       metadata: {
-        registration_id: registration.registration_id,
+        registration_id: registration.id,
         user_id: userId,
         ticket_id: ticket.id,
       },
-    });
-
-    await registration.update(
-      {
-        stripe_payment_intent_id: paymentIntent.id,
-        status: registrationStatus,
+      payment_intent_data: {
+        metadata: {
+          registration_id: registration.id,
+          user_id: userId,
+          event_id: event.id,
+          reg_id: registration.id,
+        },
       },
-      { transaction },
-    );
+      success_url:
+        'http://localhost:3000/payment/success?session_id={CHECKOUT_SESSION_ID}',
+      cancel_url: 'http://localhost:3000/payment/cancel',
+    });
 
     await transaction.commit();
 
     await redis.del(`event:${event.id}`);
-
     return {
-      message: 'Payment initiated.',
+      message: 'Checkout session created.',
       data: {
         registration_id: registration.registration_id,
-        payment_intent_id: paymentIntent.id,
-        client_secret: paymentIntent.client_secret,
-        status: paymentIntent.status,
+        checkout_session_id: session.id,
+        checkout_url: session.url,
         registration_status: registrationStatus,
         amount: totalAmountInRupees,
       },
@@ -639,7 +806,6 @@ const payTicket = async (userId, body) => {
     if (!transaction.finished) {
       await transaction.rollback();
     }
-
     console.log('PAYMENT ERROR:', error);
     throw error;
   }
@@ -2054,3 +2220,6 @@ module.exports = {
 
 //Stripe webhooks allow my backend to reliably receive server-to-server payment events from Stripe,
 // so I don't depend on the customer's browser returning to my application to confirm or fulfill a payment.
+
+//stripe.checkout.sessions.create() -> for checkout session
+//stripe.refunds.create()-> to initiate refund process

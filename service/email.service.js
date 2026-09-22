@@ -137,8 +137,8 @@ const sendRegistrationCancellationMail = async (user, registration) => {
   });
 };
 
-const sendEventCancellationMail = async (email, event) => {
-  console.log('>>>>>>>Email', email);
+const sendEventCancellationMail = async (user, event) => {
+  console.log('>>>>>>> Email:', user.email);
 
   const templatePath = path.join(
     __dirname,
@@ -152,11 +152,11 @@ const sendEventCancellationMail = async (email, event) => {
     .replace(/{{event_title}}/g, event.title)
     .replace(/{{event_date}}/g, event.start_date)
     .replace(/{{event_address}}/g, event.address)
-    .replace(/{{event_city}}/g, event.city);
+    .replace(/{{event_city}}/g, event.city || '');
 
   await transporter.sendMail({
     from: process.env.MAIL_FROM,
-    to: email,
+    to: user.email,
     subject: `Event Cancellation - ${event.title}`,
     html,
   });

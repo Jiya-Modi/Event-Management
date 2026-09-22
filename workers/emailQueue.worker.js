@@ -2,6 +2,9 @@ const result = require('dotenv').config();
 const { Worker } = require('bullmq');
 const redisConnection = require('../config/redis');
 
+const stripe = require('../config/stripe');
+const { PaymentTransaction } = require('../models');
+
 const { sendEventCancellationMail } = require('../service/email.service');
 
 console.log('EMAIL WORKER STARTED');
@@ -18,6 +21,7 @@ const emailWorker = new Worker(
 
     if (job.name === 'event-cancellation-email') {
       const { user, event } = job.data;
+
       await sendEventCancellationMail(user, event);
     }
   },
@@ -42,8 +46,3 @@ emailWorker.on('failed', (job, error) => {
 emailWorker.on('error', (error) => {
   console.error('Worker error:', error);
 });
-// emailQueue.add()
-//        ↓
-//      Redis
-//        ↓
-// Worker receives job
