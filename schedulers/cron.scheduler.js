@@ -2,7 +2,7 @@ const schedule = require('node-schedule');
 const { processWaitlist } = require('../service/user.service');
 
 const startWaitlistScheduler = () => {
-  schedule.scheduleJob('0 * * * *', async () => {
+  schedule.scheduleJob('* * * * *', async () => {
     console.log('Waitlist cron started:', new Date());
 
     try {

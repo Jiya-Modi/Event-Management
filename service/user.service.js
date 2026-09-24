@@ -775,6 +775,7 @@ const payTicket = async (userId, body) => {
         registration_id: registration.id,
         user_id: userId,
         ticket_id: ticket.id,
+        registration_status: registrationStatus,
       },
       payment_intent_data: {
         metadata: {
@@ -782,6 +783,7 @@ const payTicket = async (userId, body) => {
           user_id: userId,
           event_id: event.id,
           reg_id: registration.id,
+          registration_status: registrationStatus,
         },
       },
       success_url:

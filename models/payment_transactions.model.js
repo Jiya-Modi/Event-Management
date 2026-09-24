@@ -63,7 +63,6 @@ module.exports = (sequelize, DataTypes) => {
       payment_intent_id: {
         type: DataTypes.STRING,
         allowNull: false,
-        unique: true,
       },
 
       amount: {
@@ -78,7 +77,12 @@ module.exports = (sequelize, DataTypes) => {
       },
 
       status: {
-        type: DataTypes.ENUM('paid', 'refunded', 'partial_refund'),
+        type: DataTypes.ENUM(
+          'paid',
+          'refunded',
+          'partial_refund',
+          'refund_pending',
+        ),
         allowNull: false,
         defaultValue: 'paid',
       },

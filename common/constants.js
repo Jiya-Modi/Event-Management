@@ -98,6 +98,7 @@ module.exports = {
     REFUND_PENDING: 'refund_pending',
     PARTIAL_REFUND: 'partial_refund',
     REFUNDED: 'refunded',
+    REFUND_FAILED: 'refund_failed',
   },
 
   // Notification Types

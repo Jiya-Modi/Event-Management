@@ -1,6 +1,9 @@
 const sequelize = require('../config/db');
 const { fn, col, literal } = require('sequelize');
-const { PAYMENT_STATUS } = require('../common/constants');
+const {
+  PAYMENT_STATUS,
+  PARTIAL_REGISTRATION_STATUS,
+} = require('../common/constants');
 const stripe = require('../config/stripe');
 const {
   PaymentTransaction,
@@ -8,6 +11,7 @@ const {
   User,
   Ticket,
   Event,
+  PartialRegistration,
 } = require('../models');
 const emailQueue = require('../queues/bullmq.emailQueue');
 
@@ -39,11 +43,13 @@ const stripeWebhook = async (req, res) => {
       case 'payment_intent.succeeded': {
         const paymentIntent = eventData.data.object;
 
-        const { user_id, event_id, registration_id } = paymentIntent.metadata;
+        const { user_id, event_id, registration_id, registration_status } =
+          paymentIntent.metadata;
 
         console.log('>>>>>>>>>USER ID:', user_id);
         console.log('>>>>>>>>>EVENT ID:', event_id);
         console.log('>>>>>>>>>REGISTRATION ID:', registration_id);
+        console.log('>>>>>>>>>REGISTRATION STATUS:', registration_status);
 
         if (!user_id || !event_id || !registration_id) {
           console.error('Missing metadata in PaymentIntent:', paymentIntent.id);
@@ -65,12 +71,13 @@ const stripeWebhook = async (req, res) => {
             payment_intent_id: paymentIntent.id,
             amount: paymentIntent.amount / 100,
             currency: paymentIntent.currency.toUpperCase(),
-            status: 'paid',
+            status: PAYMENT_STATUS.PAID,
           },
         });
 
         await Registration.update(
           {
+            status: registration_status,
             payment_status: PAYMENT_STATUS.PAID,
           },
           {
@@ -82,38 +89,128 @@ const stripeWebhook = async (req, res) => {
 
         break;
       }
+
       case 'charge.refunded': {
         const charge = eventData.data.object;
 
         console.log('========== CHARGE REFUNDED ==========');
         console.log('Charge ID:', charge.id);
         console.log('Payment Intent ID:', charge.payment_intent);
+        console.log('Total Charge Amount:', charge.amount);
+        console.log('Total Refunded Amount:', charge.amount_refunded);
+
+        break;
+      }
+
+      case 'refund.created':
+      case 'refund.updated': {
+        const refund = eventData.data.object;
+
+        const { event_id, registration_id, payment_status, refund_type } =
+          refund.metadata || {};
+
+        console.log('========== REFUND EVENT ==========');
+        console.log('Event Type:', eventData.type);
+        console.log('Event ID:', event_id);
+        console.log('Registration ID:', registration_id);
+        console.log('Payment Status:', payment_status);
+        console.log('Refund Type:', refund_type);
+        console.log('Refund ID:', refund.id);
+        console.log('Payment Intent ID:', refund.payment_intent);
+        console.log('Refund Amount:', refund.amount);
+        console.log('Refund Status:', refund.status);
+
+        if (!registration_id) {
+          console.error(`Registration ID missing for Refund: ${refund.id}`);
+
+          break;
+        }
+
+        if (!payment_status) {
+          console.error(
+            `Payment status missing in refund metadata for Refund: ${refund.id}`,
+          );
+
+          break;
+        }
+
+        if (refund.status !== 'succeeded') {
+          console.log(
+            `Refund ${refund.id} is not succeeded. Current status: ${refund.status}`,
+          );
+
+          break;
+        }
 
         const paymentTransaction = await PaymentTransaction.findOne({
           where: {
-            payment_intent_id: charge.payment_intent,
+            reg_id: registration_id,
+            status: PAYMENT_STATUS.REFUND_PENDING,
           },
         });
 
         if (!paymentTransaction) {
           console.error(
-            `Payment transaction not found for PaymentIntent: ${charge.payment_intent}`,
+            `Pending refund transaction not found for Registration: ${registration_id}`,
           );
 
           break;
         }
 
-        if (paymentTransaction.status === 'refunded') {
-          console.log(
-            `Payment transaction ${paymentTransaction.id} is already refunded`,
-          );
+        const registration = await Registration.findOne({
+          where: {
+            id: registration_id,
+          },
+        });
+
+        if (!registration) {
+          console.error(`Registration not found: ${registration_id}`);
 
           break;
+        }
+
+        if (payment_status === PAYMENT_STATUS.PARTIAL_REFUND) {
+          let remainingRefundQuantity = Math.floor(
+            refund.amount / 100 / Number(registration.ticket?.price || 1),
+          );
+
+          const pendingPartialRegistrations = await PartialRegistration.findAll(
+            {
+              where: {
+                reg_id: registration.id,
+                status: PARTIAL_REGISTRATION_STATUS.PENDING,
+              },
+              order: [['created_at', 'ASC']],
+            },
+          );
+
+          for (const partialRegistration of pendingPartialRegistrations) {
+            if (remainingRefundQuantity <= 0) {
+              break;
+            }
+
+            const quantity = Number(partialRegistration.quantity);
+
+            if (quantity <= remainingRefundQuantity) {
+              await PartialRegistration.update(
+                {
+                  status: PARTIAL_REGISTRATION_STATUS.REFUND,
+                },
+                {
+                  where: {
+                    id: partialRegistration.id,
+                  },
+                },
+              );
+
+              remainingRefundQuantity -= quantity;
+            }
+          }
         }
 
         await PaymentTransaction.update(
           {
-            status: 'refunded',
+            status: payment_status,
           },
           {
             where: {
@@ -122,103 +219,55 @@ const stripeWebhook = async (req, res) => {
           },
         );
 
-        const registration = await Registration.findOne({
-          where: {
-            id: paymentTransaction.reg_id,
-          },
-          include: [
-            {
-              model: User,
-              as: 'user',
-              attributes: {
-                include: [
-                  [
-                    sequelize.literal(
-                      `pgp_sym_decrypt("user"."email", '${process.env.ENCRYPTION_KEY}')`,
-                    ),
-                    'decrypted_email',
-                  ],
-                ],
-              },
-            },
-          ],
+        await registration.update({
+          payment_status,
         });
 
-        if (!registration) {
+        console.log(
+          `${refund_type || 'refund'} refund completed for registration: ${registration.registration_id}`,
+        );
+
+        break;
+      }
+
+      case 'refund.failed': {
+        const refund = eventData.data.object;
+
+        console.log('========== REFUND FAILED ==========');
+        console.log('Refund ID:', refund.id);
+        console.log('Payment Intent ID:', refund.payment_intent);
+        console.log('Refund Amount:', refund.amount);
+        console.log('Refund Status:', refund.status);
+
+        const paymentTransaction = await PaymentTransaction.findOne({
+          where: {
+            payment_intent_id: refund.payment_intent,
+            status: PAYMENT_STATUS.REFUND_PENDING,
+          },
+        });
+
+        if (!paymentTransaction) {
           console.error(
-            `Registration not found for PaymentTransaction: ${paymentTransaction.id}`,
+            `Pending refund transaction not found for PaymentIntent: ${refund.payment_intent}`,
           );
 
           break;
         }
 
-        await Registration.update(
+        await PaymentTransaction.update(
           {
-            payment_status: PAYMENT_STATUS.REFUNDED,
+            status: PAYMENT_STATUS.REFUND_FAILED,
           },
           {
             where: {
-              id: registration.id,
+              id: paymentTransaction.id,
             },
           },
         );
 
-        const event = await Event.findOne({
-          where: {
-            id: paymentTransaction.event_id,
-          },
-          paranoid: false,
-        });
-
-        const userEmail = registration.user?.get('decrypted_email');
-
-        console.log('USER EMAIL:', userEmail);
-        console.log('EVENT:', event);
-
-        if (!userEmail) {
-          console.error(
-            `User email not found for registration: ${registration.id}`,
-          );
-
-          break;
-        }
-
-        if (!event) {
-          console.error(
-            `Event not found for event ID: ${paymentTransaction.event_id}`,
-          );
-
-          break;
-        }
-
-        const job = await emailQueue.add(
-          'event-cancellation-email',
-          {
-            user: {
-              id: registration.user.id,
-              email: userEmail,
-            },
-            event: {
-              id: event.id,
-              title: event.title,
-              start_date: event.start_date,
-              address: event.address,
-              city: event.city,
-              created_by: event.created_by,
-            },
-          },
-          {
-            attempts: 3,
-            backoff: {
-              type: 'exponential',
-              delay: 5000,
-            },
-            removeOnComplete: true,
-            removeOnFail: false,
-          },
+        console.log(
+          `Refund failed for registration: ${paymentTransaction.reg_id}`,
         );
-
-        console.log('EMAIL JOB ADDED:', job.id);
 
         break;
       }

@@ -1763,3 +1763,95 @@ module.exports = {
 //                     │
 //                     ▼
 //           sendEventCancellationMail()
+
+// PaymentIntent
+//     ↓
+// Charge
+//     ↓
+// Refund
+
+// executeEventRefund()  -> scheduler event
+//         ↓
+// stripe.refunds.create()
+//         ↓
+// Stripe creates refund
+//         ↓
+// return from scheduler
+//         ↓
+// Stripe webhook
+// refund.created / refund.updated
+//         ↓
+// verify refund
+//         ↓
+// update PaymentTransaction
+//         ↓
+// update Registration
+//         ↓
+// send email
+
+// refund.created
+//       ↓
+// Refund exists
+//       ↓
+//         ┌───────────────┐
+//         ↓               ↓
+//    succeeded          failed
+//         ↓               ↓
+//    REFUNDED       REFUND_FAILED
+
+//               SCHEDULED JOB
+//                    │
+//                    │
+//                    ▼
+//           Find eligible registrations
+//                    │
+//                    ▼
+//             Calculate refund
+//                    │
+//                    ▼
+//         stripe.refunds.create()
+//                    │
+//                    ▼
+//             Store refund ID
+//             REFUND_PENDING
+//                    │
+//                    │
+//                    ▼
+//                 Stripe
+//                    │
+//         ┌──────────┼──────────┐
+//         │          │          │
+//         ▼          ▼          ▼
+//  refund.created  refund.updated  refund.failed
+//         │          │          │
+//         └──────────┼──────────┘
+//                    │
+//                    ▼
+//            Refund webhook
+//                    │
+//                    ▼
+//            Find PaymentTransaction
+//                    │
+//                    ▼
+//         Check refund.status
+//                    │
+//            ┌───────┴────────┐
+//            ▼                ▼
+//       succeeded           failed
+//            │                │
+//            ▼                ▼
+//        REFUNDED       REFUND_FAILED
+//            │
+//            ▼
+//      Registration
+//      → REFUNDED
+//            │
+//            ▼
+//      Generate QR/PDF
+//            │
+//            ▼
+//       Send email
+
+//Stripe's event documentation explicitly says that charge.
+// refunded occurs when a charge is refunded, including partial refunds,
+// and recommends refund.created for information about the specific refund.

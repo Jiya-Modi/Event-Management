@@ -5,6 +5,8 @@ const Messages = require('../common/messages');
 const getMessage = require('../utils/messageFormatter');
 const sequelize = require('../config/db');
 
+const stripe = require('../config/stripe');
+
 const {
   Event,
   Scheduler,
@@ -12,6 +14,7 @@ const {
   User,
   Registration,
   PartialRegistration,
+  PaymentTransaction,
 } = require('../models');
 const {
   EVENT_STATUS,
@@ -292,6 +295,17 @@ const executeEventRefund = async (scheduler) => {
     }
 
     const registrations = await Registration.findAll({
+      where: {
+        payment_status: {
+          [Op.in]: [PAYMENT_STATUS.PARTIAL_REFUND, PAYMENT_STATUS.PAID],
+        },
+        status: {
+          [Op.in]: [
+            REGISTRATION_STATUS.WAITLIST,
+            REGISTRATION_STATUS.PARTIAL_CONFIRM,
+          ],
+        },
+      },
       include: [
         {
           model: Ticket,
@@ -326,95 +340,146 @@ const executeEventRefund = async (scheduler) => {
     });
 
     for (const registration of registrations) {
-      const ticket = registration.ticket;
+      const transaction = await sequelize.transaction();
 
-      if (!ticket) {
-        continue;
-      }
-
-      const ticketPrice = Number(ticket.price || 0);
-      const requiredQuantity = Number(registration.quantity || 0);
-
-      if (registration.status === REGISTRATION_STATUS.WAITLIST) {
-        const refundAmount = requiredQuantity * ticketPrice;
-
-        await registration.update({
-          payment_status: PAYMENT_STATUS.REFUNDED,
-        });
-
-        const user = registration.user;
+      try {
         const ticket = registration.ticket;
-        const event = ticket.event;
 
-        await sendWaitlistStatusMail({
-          user,
-          event,
-          registration,
-          requiredQuantity,
-          refundAmount,
-        });
+        if (!ticket) {
+          await transaction.rollback();
+          continue;
+        }
 
-        continue;
-      }
-
-      if (registration.status === REGISTRATION_STATUS.PARTIAL_CONFIRM) {
-        const confirmedPartialRow = await PartialRegistration.findOne({
-          attributes: [
-            [
-              sequelize.fn(
-                'COALESCE',
-                sequelize.fn(
-                  'SUM',
-                  sequelize.col('PartialRegistration.quantity'),
-                ),
-                0,
-              ),
-              'confirmed_partial',
-            ],
-          ],
+        const paymentTransaction = await PaymentTransaction.findOne({
           where: {
-            status: PARTIAL_REGISTRATION_STATUS.CONFIRMED,
             reg_id: registration.id,
+            status: PAYMENT_STATUS.PAID,
           },
-          raw: true,
+          transaction,
         });
 
-        const confirmedPartial = Number(
-          confirmedPartialRow?.confirmed_partial || 0,
+        if (!paymentTransaction?.payment_intent_id) {
+          await transaction.rollback();
+          continue;
+        }
+
+        const ticketPrice = Number(ticket.price || 0);
+        const requiredQuantity = Number(registration.quantity || 0);
+
+        let refundQuantity = 0;
+        let confirmedPartial = 0;
+        let paymentStatus;
+
+        if (registration.status === REGISTRATION_STATUS.WAITLIST) {
+          refundQuantity = requiredQuantity;
+          paymentStatus = PAYMENT_STATUS.REFUNDED;
+        }
+
+        if (registration.status === REGISTRATION_STATUS.PARTIAL_CONFIRM) {
+          const confirmedPartialRow = await PartialRegistration.findOne({
+            attributes: [
+              [
+                sequelize.fn(
+                  'COALESCE',
+                  sequelize.fn(
+                    'SUM',
+                    sequelize.col('PartialRegistration.quantity'),
+                  ),
+                  0,
+                ),
+                'confirmed_partial',
+              ],
+            ],
+            where: {
+              reg_id: registration.id,
+              status: PARTIAL_REGISTRATION_STATUS.CONFIRMED,
+            },
+            raw: true,
+            transaction,
+          });
+
+          confirmedPartial = Number(
+            confirmedPartialRow?.confirmed_partial || 0,
+          );
+
+          refundQuantity = Math.max(requiredQuantity - confirmedPartial, 0);
+
+          paymentStatus = PAYMENT_STATUS.PARTIAL_REFUND;
+        }
+
+        if (refundQuantity <= 0) {
+          await transaction.rollback();
+          continue;
+        }
+
+        const refundAmount = refundQuantity * ticketPrice;
+
+        if (refundAmount <= 0) {
+          await transaction.rollback();
+          continue;
+        }
+
+        const existingRefund = await PaymentTransaction.findOne({
+          where: {
+            reg_id: registration.id,
+            status: {
+              [Op.in]: [
+                PAYMENT_STATUS.REFUND_PENDING,
+                PAYMENT_STATUS.REFUNDED,
+                PAYMENT_STATUS.PARTIAL_REFUND,
+              ],
+            },
+          },
+          transaction,
+        });
+
+        if (existingRefund) {
+          await transaction.rollback();
+          continue;
+        }
+
+        await PaymentTransaction.create(
+          {
+            reg_id: registration.id,
+            user_id: registration.user_id,
+            event_id: event.id,
+            payment_intent_id: paymentTransaction.payment_intent_id,
+            charge_id: paymentTransaction.charge_id || null,
+            amount: refundAmount,
+            status: PAYMENT_STATUS.REFUND_PENDING,
+          },
+          {
+            transaction,
+          },
         );
 
-        const quantityRefund = Math.max(requiredQuantity - confirmedPartial, 0);
+        await transaction.commit();
 
-        const refundAmount = quantityRefund * ticketPrice;
-
-        const user = registration.user;
-        const ticket = registration.ticket;
-        const event = ticket.event;
-
-        const qrBuffer = await generateQRCode(
-          registration.registration_id,
-          confirmedPartial,
+        await stripe.refunds.create(
+          {
+            payment_intent: paymentTransaction.payment_intent_id,
+            amount: Math.round(refundAmount * 100),
+            metadata: {
+              registration_id: registration.id,
+              event_id: event.id,
+              refund_type:
+                registration.status === REGISTRATION_STATUS.WAITLIST
+                  ? 'full'
+                  : 'partial',
+              payment_status: paymentStatus,
+              refund_quantity: String(refundQuantity),
+            },
+          },
+          {
+            idempotencyKey: `registration-refund-${registration.id}`,
+          },
         );
+      } catch (error) {
+        if (!transaction.finished) {
+          await transaction.rollback();
+        }
 
-        const quantity = confirmedPartial;
-
-        const pdfBuffer = await generateTicketPDF({
-          quantity,
-          registration,
-          user,
-          event,
-          ticket,
-          qrBuffer,
-        });
-
-        await sendQuantityConfirmationMail({
-          user,
-          event,
-          registration,
-          confirmedPartial,
-          refundAmount,
-          pdfBuffer,
-        });
+        throw error;
       }
     }
   } catch (error) {
