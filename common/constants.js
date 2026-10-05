@@ -52,6 +52,9 @@ module.exports = {
 
     NOTIFICATION: 'Notification',
     NOTIFICATIONS: 'Notifications',
+
+    PLAN: 'Plan',
+    PLANS: 'plans',
   },
 
   // Roles
@@ -176,5 +179,12 @@ module.exports = {
     CREATE: 'create',
     UPDATE: 'update',
     DELETE: 'delete',
+  },
+
+  SUBSCRIPTION_STATUS: {
+    ACTIVE: 'active',
+    PAST_DUE: 'past_due',
+    CANCELED: 'canceled',
+    CANCEL_SCHEDULED: 'cancel_scheduled',
   },
 };

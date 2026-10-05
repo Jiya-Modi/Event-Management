@@ -6,6 +6,7 @@ const {
   Registration,
   Role,
   EventCategory,
+  Plan,
 } = require('../models');
 
 const {
@@ -1323,6 +1324,55 @@ const getUserDetails = async (query) => {
   }
 };
 
+const addPlan = async (body) => {
+  const transaction = await sequelize.transaction();
+
+  try {
+    const { name, interval, amount, currency, price_id } = body;
+
+    const existingPlan = await Plan.findOne({
+      where: {
+        price_id,
+      },
+      transaction,
+    });
+
+    if (existingPlan) {
+      throw new Error('Plan with this price already exists');
+    }
+
+    const plan = await Plan.create(
+      {
+        name,
+        interval,
+        amount,
+        currency,
+        price_id,
+      },
+      {
+        transaction,
+      },
+    );
+
+    await transaction.commit();
+
+    return {
+      plan: {
+        id: plan.id,
+        name: plan.name,
+        interval: plan.interval,
+        amount: plan.amount,
+        currency: plan.currency,
+        price_id: plan.price_id,
+        created_at: plan.created_at,
+      },
+    };
+  } catch (err) {
+    await transaction.rollback();
+    throw err;
+  }
+};
+
 module.exports = {
   destroyUser,
   getAdminDashboard,
@@ -1333,6 +1383,7 @@ module.exports = {
   getUsers,
   getUserDetails,
   addOrganizer,
+  addPlan,
 };
 
 //waitlist -> registration -> Registration confirmation mail      |--->if suitable then works and if not than keep it in waitlist
@@ -1365,3 +1416,8 @@ module.exports = {
 // socket.emit() → sends only to the current sender.
 
 //event delete to all connected users same as event update.
+
+// git add .
+// git status
+// git commit -m "implemented stripe-partial-refund"
+// git push -u origin main

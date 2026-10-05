@@ -119,6 +119,22 @@ const addOrganizer = async (req, res, next) => {
   }
 };
 
+const addPlan = async (req, res, next) => {
+  try {
+    const data = await adminService.addPlan(req.body);
+
+    return success(
+      res,
+      STATUS_CODES.CREATED,
+      Messages.CREATED,
+      MODULES.PLAN,
+      data,
+    );
+  } catch (error) {
+    next(error);
+  }
+};
+
 module.exports = {
   destroyUser,
   getAdminDashboard,
@@ -129,4 +145,5 @@ module.exports = {
   getUsers,
   getUserDetails,
   addOrganizer,
+  addPlan,
 };

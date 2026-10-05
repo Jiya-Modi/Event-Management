@@ -3,6 +3,7 @@ const { fn, col, literal } = require('sequelize');
 const {
   PAYMENT_STATUS,
   PARTIAL_REGISTRATION_STATUS,
+  SUBSCRIPTION_STATUS,
 } = require('../common/constants');
 const stripe = require('../config/stripe');
 const {
@@ -12,6 +13,8 @@ const {
   Ticket,
   Event,
   PartialRegistration,
+  UserPlan,
+  Plan,
 } = require('../models');
 const emailQueue = require('../queues/bullmq.emailQueue');
 
@@ -40,55 +43,55 @@ const stripeWebhook = async (req, res) => {
 
   try {
     switch (eventData.type) {
-      case 'payment_intent.succeeded': {
-        const paymentIntent = eventData.data.object;
+      // case 'payment_intent.succeeded': {
+      //   const paymentIntent = eventData.data.object;
 
-        const { user_id, event_id, registration_id, registration_status } =
-          paymentIntent.metadata;
+      //   const { user_id, event_id, registration_id, registration_status } =
+      //     paymentIntent.metadata;
 
-        console.log('>>>>>>>>>USER ID:', user_id);
-        console.log('>>>>>>>>>EVENT ID:', event_id);
-        console.log('>>>>>>>>>REGISTRATION ID:', registration_id);
-        console.log('>>>>>>>>>REGISTRATION STATUS:', registration_status);
+      //   console.log('>>>>>>>>>USER ID:', user_id);
+      //   console.log('>>>>>>>>>EVENT ID:', event_id);
+      //   console.log('>>>>>>>>>REGISTRATION ID:', registration_id);
+      //   console.log('>>>>>>>>>REGISTRATION STATUS:', registration_status);
 
-        if (!user_id || !event_id || !registration_id) {
-          console.error('Missing metadata in PaymentIntent:', paymentIntent.id);
+      //   if (!user_id || !event_id || !registration_id) {
+      //     console.error('Missing metadata in PaymentIntent:', paymentIntent.id);
 
-          return res.status(400).json({
-            success: false,
-            message: 'Required payment metadata is missing',
-          });
-        }
+      //     return res.status(400).json({
+      //       success: false,
+      //       message: 'Required payment metadata is missing',
+      //     });
+      //   }
 
-        await PaymentTransaction.findOrCreate({
-          where: {
-            payment_intent_id: paymentIntent.id,
-          },
-          defaults: {
-            user_id,
-            event_id,
-            reg_id: registration_id,
-            payment_intent_id: paymentIntent.id,
-            amount: paymentIntent.amount / 100,
-            currency: paymentIntent.currency.toUpperCase(),
-            status: PAYMENT_STATUS.PAID,
-          },
-        });
+      //   await PaymentTransaction.findOrCreate({
+      //     where: {
+      //       payment_intent_id: paymentIntent.id,
+      //     },
+      //     defaults: {
+      //       user_id,
+      //       event_id,
+      //       reg_id: registration_id,
+      //       payment_intent_id: paymentIntent.id,
+      //       amount: paymentIntent.amount / 100,
+      //       currency: paymentIntent.currency.toUpperCase(),
+      //       status: PAYMENT_STATUS.PAID,
+      //     },
+      //   });
 
-        await Registration.update(
-          {
-            status: registration_status,
-            payment_status: PAYMENT_STATUS.PAID,
-          },
-          {
-            where: {
-              id: registration_id,
-            },
-          },
-        );
+      //   await Registration.update(
+      //     {
+      //       status: registration_status,
+      //       payment_status: PAYMENT_STATUS.PAID,
+      //     },
+      //     {
+      //       where: {
+      //         id: registration_id,
+      //       },
+      //     },
+      //   );
 
-        break;
-      }
+      //   break;
+      // }
 
       case 'charge.refunded': {
         const charge = eventData.data.object;
@@ -267,6 +270,445 @@ const stripeWebhook = async (req, res) => {
 
         console.log(
           `Refund failed for registration: ${paymentTransaction.reg_id}`,
+        );
+
+        break;
+      }
+
+      case 'checkout.session.completed': {
+        const session = eventData.data.object;
+
+        console.log('========== CHECKOUT SESSION COMPLETED ==========');
+        console.log('Checkout Session ID:', session.id);
+        console.log('Customer ID:', session.customer);
+        console.log('Subscription ID:', session.subscription);
+        console.log('User ID:', session.metadata?.user_id);
+        console.log('Plan ID:', session.metadata?.plan_id);
+
+        break;
+      }
+
+      case 'customer.subscription.created': {
+        const subscription = eventData.data.object;
+
+        console.log('========== SUBSCRIPTION CREATED ==========');
+        console.log('Subscription ID:', subscription.id);
+        console.log('Customer ID:', subscription.customer);
+        console.log('Status:', subscription.status);
+
+        const userId = subscription.metadata?.user_id;
+        const planId = subscription.metadata?.plan_id;
+
+        if (!userId || !planId) {
+          console.error(
+            `User ID or Plan ID missing for Subscription: ${subscription.id}`,
+          );
+
+          break;
+        }
+
+        const existingUserPlan = await UserPlan.findOne({
+          where: {
+            subscription_id: subscription.id,
+          },
+        });
+
+        if (existingUserPlan) {
+          console.log(
+            `User plan already exists for Subscription: ${subscription.id}`,
+          );
+
+          break;
+        }
+
+        const subscriptionItem = subscription.items?.data?.[0];
+
+        const validFrom = subscriptionItem?.current_period_start
+          ? new Date(subscriptionItem.current_period_start * 1000)
+          : null;
+
+        const validUntil = subscriptionItem?.current_period_end
+          ? new Date(subscriptionItem.current_period_end * 1000)
+          : null;
+
+        await UserPlan.create({
+          user_id: userId,
+          plan_id: planId,
+          customer_id: subscription.customer,
+          subscription_id: subscription.id,
+          status: subscription.status,
+          valid_from: validFrom,
+          valid_until: validUntil,
+        });
+
+        console.log(`User plan created for Subscription: ${subscription.id}`);
+
+        break;
+      }
+
+      case 'subscription_schedule.created': {
+        const schedule = eventData.data.object;
+
+        console.log('========== SUBSCRIPTION SCHEDULE CREATED ==========');
+        console.log('Schedule ID:', schedule.id);
+        console.log('Subscription ID:', schedule.subscription);
+        console.log('Status:', schedule.status);
+
+        break;
+      }
+
+      case 'subscription_schedule.updated': {
+        const schedule = eventData.data.object;
+
+        console.log('========== SUBSCRIPTION SCHEDULE UPDATED ==========');
+        console.log('Schedule ID:', schedule.id);
+        console.log('Subscription ID:', schedule.subscription);
+        console.log('Status:', schedule.status);
+
+        const userPlan = await UserPlan.findOne({
+          where: {
+            stripe_schedule_id: schedule.id,
+          },
+        });
+
+        if (!userPlan) {
+          console.log(`User plan not found for Schedule: ${schedule.id}`);
+          break;
+        }
+
+        await userPlan.update({
+          stripe_schedule_id: schedule.id,
+        });
+
+        break;
+      }
+
+      case 'subscription_schedule.completed': {
+        const schedule = eventData.data.object;
+
+        console.log('========== SUBSCRIPTION SCHEDULE COMPLETED ==========');
+        console.log('Schedule ID:', schedule.id);
+        console.log('Subscription ID:', schedule.subscription);
+        console.log('Status:', schedule.status);
+
+        const userPlan = await UserPlan.findOne({
+          where: {
+            stripe_schedule_id: schedule.id,
+          },
+        });
+
+        if (!userPlan) {
+          console.log(`User plan not found for Schedule: ${schedule.id}`);
+          break;
+        }
+
+        await userPlan.update({
+          stripe_schedule_id: null,
+          pending_plan_id: null,
+        });
+
+        break;
+      }
+
+      case 'subscription_schedule.released': {
+        const schedule = eventData.data.object;
+
+        console.log('========== SUBSCRIPTION SCHEDULE RELEASED ==========');
+        console.log('Schedule ID:', schedule.id);
+        console.log('Subscription ID:', schedule.subscription);
+        console.log('Status:', schedule.status);
+
+        const userPlan = await UserPlan.findOne({
+          where: {
+            stripe_schedule_id: schedule.id,
+          },
+        });
+
+        if (!userPlan) {
+          console.log(`User plan not found for Schedule: ${schedule.id}`);
+          break;
+        }
+
+        await userPlan.update({
+          stripe_schedule_id: null,
+          pending_plan_id: null,
+        });
+
+        break;
+      }
+
+      case 'subscription_schedule.canceled': {
+        const schedule = eventData.data.object;
+
+        console.log('========== SUBSCRIPTION SCHEDULE CANCELED ==========');
+        console.log('Schedule ID:', schedule.id);
+        console.log('Subscription ID:', schedule.subscription);
+        console.log('Status:', schedule.status);
+
+        const userPlan = await UserPlan.findOne({
+          where: {
+            stripe_schedule_id: schedule.id,
+          },
+        });
+
+        if (!userPlan) {
+          console.log(`User plan not found for Schedule: ${schedule.id}`);
+          break;
+        }
+
+        await userPlan.update({
+          stripe_schedule_id: null,
+          pending_plan_id: null,
+        });
+
+        break;
+      }
+
+      case 'subscription_schedule.aborted': {
+        const schedule = eventData.data.object;
+
+        console.log('========== SUBSCRIPTION SCHEDULE ABORTED ==========');
+        console.log('Schedule ID:', schedule.id);
+        console.log('Subscription ID:', schedule.subscription);
+        console.log('Status:', schedule.status);
+
+        const userPlan = await UserPlan.findOne({
+          where: {
+            stripe_schedule_id: schedule.id,
+          },
+        });
+
+        if (!userPlan) {
+          console.log(`User plan not found for Schedule: ${schedule.id}`);
+          break;
+        }
+
+        await userPlan.update({
+          stripe_schedule_id: null,
+          pending_plan_id: null,
+        });
+
+        break;
+      }
+
+      case 'customer.subscription.updated': {
+        const subscription = eventData.data.object;
+
+        const subscriptionItem = subscription.items?.data?.[0];
+
+        if (!subscriptionItem) {
+          console.error('Subscription item not found');
+          break;
+        }
+
+        const priceId = subscriptionItem.price?.id;
+
+        if (!priceId) {
+          console.error('Subscription price ID not found');
+          break;
+        }
+
+        const plan = await Plan.findOne({
+          where: {
+            price_id: priceId,
+          },
+        });
+
+        if (!plan) {
+          console.error(`Plan not found for price ${priceId}`);
+          break;
+        }
+
+        const userPlan = await UserPlan.findOne({
+          where: {
+            subscription_id: subscription.id,
+            status: 'active',
+          },
+        });
+
+        if (!userPlan) {
+          console.error(
+            `Active UserPlan not found for subscription ${subscription.id}`,
+          );
+          break;
+        }
+
+        const validFrom = subscriptionItem.current_period_start
+          ? new Date(subscriptionItem.current_period_start * 1000)
+          : userPlan.valid_from;
+
+        const validUntil = subscriptionItem.current_period_end
+          ? new Date(subscriptionItem.current_period_end * 1000)
+          : userPlan.valid_until;
+
+        if (userPlan.plan_id === plan.id) {
+          await userPlan.update({
+            valid_from: validFrom,
+            valid_until: validUntil,
+            cancel_at_period_end: subscription.cancel_at_period_end,
+          });
+
+          console.log(
+            subscription.cancel_at_period_end
+              ? `Subscription cancellation scheduled for ${subscription.id}`
+              : `Subscription updated for ${subscription.id}`,
+          );
+
+          break;
+        }
+
+        const isScheduledDowngrade =
+          userPlan.pending_plan_id &&
+          userPlan.pending_plan_id === plan.id &&
+          userPlan.stripe_schedule_id;
+
+        await sequelize.transaction(async (transaction) => {
+          await userPlan.update(
+            {
+              status: 'canceled',
+            },
+            {
+              transaction,
+            },
+          );
+
+          await UserPlan.create(
+            {
+              customer_id: userPlan.customer_id,
+              plan_id: plan.id,
+              subscription_id: subscription.id,
+              user_id: userPlan.user_id,
+              status: 'active',
+              valid_from: validFrom,
+              valid_until: validUntil,
+              stripe_schedule_id: null,
+              pending_plan_id: null,
+              cancel_at_period_end: subscription.cancel_at_period_end,
+            },
+            {
+              transaction,
+            },
+          );
+        });
+
+        console.log(
+          isScheduledDowngrade
+            ? `Scheduled downgrade completed: ${userPlan.plan_id} -> ${plan.id}`
+            : `Subscription plan changed: ${userPlan.plan_id} -> ${plan.id}`,
+        );
+
+        break;
+      }
+
+      case 'customer.subscription.deleted': {
+        const subscription = eventData.data.object;
+
+        console.log('========== SUBSCRIPTION DELETED ==========');
+        console.log('Subscription ID:', subscription.id);
+        console.log('Customer ID:', subscription.customer);
+        console.log('Status:', subscription.status);
+
+        const userPlan = await UserPlan.findOne({
+          where: {
+            subscription_id: subscription.id,
+            status: 'active',
+          },
+        });
+
+        if (!userPlan) {
+          console.error(
+            `Active UserPlan not found for subscription ${subscription.id}`,
+          );
+          break;
+        }
+
+        const subscriptionItem = subscription.items?.data?.[0];
+
+        const validFrom = subscriptionItem?.current_period_start
+          ? new Date(subscriptionItem.current_period_start * 1000)
+          : userPlan.valid_from;
+
+        const validUntil = subscriptionItem?.current_period_end
+          ? new Date(subscriptionItem.current_period_end * 1000)
+          : userPlan.valid_until;
+
+        await userPlan.update({
+          status: SUBSCRIPTION_STATUS.CANCELED,
+          valid_from: validFrom,
+          valid_until: validUntil,
+          cancel_at_period_end: false,
+          pending_plan_id: null,
+          stripe_schedule_id: null,
+        });
+
+        console.log(`User plan cancelled for subscription ${subscription.id}`);
+
+        break;
+      }
+
+      case 'invoice.paid': {
+        const invoice = eventData.data.object;
+
+        console.log('========== INVOICE PAID ==========');
+        console.log('Invoice ID:', invoice.id);
+        console.log('Customer ID:', invoice.customer);
+        console.log('Amount Paid:', invoice.amount_paid);
+        console.log('Currency:', invoice.currency);
+
+        break;
+      }
+
+      case 'invoice.payment_failed': {
+        const invoice = eventData.data.object;
+
+        console.log('========== INVOICE PAYMENT FAILED ==========');
+        console.log('Invoice ID:', invoice.id);
+        console.log('Customer ID:', invoice.customer);
+        console.log('Subscription ID:', invoice.subscription);
+        console.log('Amount Due:', invoice.amount_due);
+        console.log('Currency:', invoice.currency);
+
+        if (!invoice.subscription) {
+          break;
+        }
+
+        const userPlan = await UserPlan.findOne({
+          where: {
+            subscription_id: invoice.subscription,
+          },
+        });
+
+        if (!userPlan) {
+          console.error(
+            `User plan not found for Subscription: ${invoice.subscription}`,
+          );
+
+          break;
+        }
+
+        await userPlan.update({
+          status: 'past_due',
+        });
+
+        console.log(
+          `User plan marked as past_due for Subscription: ${invoice.subscription}`,
+        );
+
+        break;
+      }
+
+      case 'subscription_schedule.expiring': {
+        const schedule = eventData.data.object;
+
+        await UserPlan.update(
+          {
+            status: 'expiring',
+          },
+          {
+            where: {
+              stripe_schedule_id: schedule.id,
+            },
+          },
         );
 
         break;
@@ -572,3 +1014,186 @@ module.exports = {
 //  │
 //  ▼
 // DB
+
+// SUBSCRIPTION WEBHOOK EVENTS
+// checkout.session.completed
+// customer.subscription.created
+// customer.subscription.updated
+// customer.subscription.deleted
+// invoice.paid
+// invoice.payment_failed
+
+// User
+//  ↓
+// POST /subscription/upgrade?plan_id=NEW_PLAN_ID
+//  ↓
+// Find current UserPlan
+//  ↓
+// Find new Plan
+//  ↓
+// Validate new plan
+//  ↓
+// Retrieve Stripe Subscription
+//  ↓
+// Replace existing Stripe Subscription Item's Price
+//  ↓
+// Stripe calculates proration
+//  ↓
+// Stripe immediately invoices the prorated amount
+//  ↓
+// Payment succeeds
+//  ↓
+// customer.subscription.updated webhook
+//  ↓
+// Update user_plans
+
+// Old plan unused portion
+//         ↓
+// Credit
+
+// New plan remaining portion
+//         ↓
+// Charge
+//         ↓
+// Prorated invoice
+
+//         ↓
+// Attempt payment immediately
+
+//               USER
+//                 │
+//                 │
+//         Selects Premium
+//                 │
+//                 ▼
+//     POST /subscription/upgrade
+//                 │
+//                 ▼
+//        Find UserPlan
+//                 │
+//                 ▼
+//        Find Current Plan
+//                 │
+//                 ▼
+//          Find New Plan
+//                 │
+//                 ▼
+//     Retrieve Stripe Subscription
+//                 │
+//                 ▼
+//     Get Subscription Item ID
+//                 │
+//                 ▼
+//  stripe.subscriptions.update()
+//                 │
+//        ┌────────┴────────┐
+//        │                 │
+//  Payment fails      Payment succeeds
+//        │                 │
+//        ▼                 ▼
+//  API returns        Stripe updates
+//     error            subscription
+//                          │
+//                          ▼
+//           customer.subscription.updated
+//                          │
+//                          ▼
+//                  Find UserPlan
+//                          │
+//                          ▼
+//               Find Plan using
+//               Stripe price_id
+//                          │
+//                          ▼
+//                  Update UserPlan
+//                          │
+//            ┌─────────────┼──────────────┐
+//            ▼             ▼              ▼
+//         plan_id        status       valid dates
+
+// stripe.subscription.cancel() -> Cancels subscription immediately
+
+// USER CLICKS CANCEL
+//         ↓
+// stripe.subscriptions.update()
+// cancel_at_period_end = true
+//         ↓
+// customer.subscription.updated
+//         ↓
+// UserPlan:
+// status = active
+// cancel_at_period_end = true
+//         ↓
+// User keeps using plan
+//         ↓
+// Billing period ends
+//         ↓
+// Stripe ends subscription
+//         ↓
+// customer.subscription.deleted
+//         ↓
+// UserPlan:
+// status = canceled
+// cancel_at_period_end = false
+
+//               SUBSCRIPTION
+//                    │
+//        ┌───────────┼───────────┐
+//        │           │           │
+//     Upgrade    Downgrade    Cancel
+//        │           │           │
+//        ▼           ▼           ▼
+//     Immediate   Scheduled   At period end
+//        │           │           │
+//        │       pending_plan  cancel_at_period_end
+//        │           │           │
+//        └───────────┼───────────┘
+//                    │
+//        customer.subscription.updated
+//                    │
+//         ┌──────────┴──────────┐
+//         │                     │
+//   Plan changed?          Same plan?
+//         │                     │
+//     Yes │                 update flags
+//         ▼
+//  Old row → canceled
+//  New row → active
+//                    │
+//             Subscription ends
+//                    │
+//        customer.subscription.deleted
+//                    │
+//             active → canceled
+
+//                    ┌──────────────┐
+//                    │    ACTIVE    │
+//                    └──────┬───────┘
+//                           │
+//         ┌─────────────────┼──────────────────┐
+//         │                 │                  │
+//         ▼                 ▼                  ▼
+//  Upgrade Plan      Schedule Downgrade   Cancel Plan
+//         │                 │                  │
+//         ▼                 ▼                  ▼
+//  Immediate Change    Future Change       Period End
+
+// Stripe's three pause_collection.behavior
+// 1) void -> No service = no payment
+// 2) keep_as_draft -> Service continues = payment is delayed
+// 3) mark_uncollectible -> Service continues = you're intentionally giving it for free.
+
+//                  PAUSE
+//                    │
+//       ┌────────────┼────────────┐
+//       ↓            ↓            ↓
+//     void       keep_as_draft   mark_uncollectible
+//       │            │            │
+//  discard       keep invoice   mark invoice
+//  invoice        as draft       uncollectible
+//       │            │            │
+//       └────────────┼────────────┘
+//                    ↓
+//               resumes_at
+//                    ↓
+//             Normal billing

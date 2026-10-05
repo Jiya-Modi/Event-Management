@@ -667,3 +667,355 @@
  *       500:
  *         description: Internal server error.
  */
+/**
+ * @swagger
+ * /user/subscribe-plan:
+ *   post:
+ *     summary: Create a subscription checkout session
+ *     tags:
+ *       - User
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: plan_id
+ *         required: true
+ *         description: ID of the subscription plan
+ *         schema:
+ *           type: string
+ *           format: uuid
+ *           example: 550e8400-e29b-41d4-a716-446655440000
+ *     responses:
+ *       200:
+ *         description: Checkout session created successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: Checkout session created.
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     user_id:
+ *                       type: string
+ *                       format: uuid
+ *                       example: 550e8400-e29b-41d4-a716-446655440000
+ *                     checkout_session_id:
+ *                       type: string
+ *                       example: cs_test_a1b2c3d4e5f6
+ *                     checkout_url:
+ *                       type: string
+ *                       format: uri
+ *                       example: https://checkout.stripe.com/c/pay/cs_test_a1b2c3d4e5f6
+ *                     plan_id:
+ *                       type: string
+ *                       format: uuid
+ *                       example: 7d9f6c3a-1234-4567-8901-abcdef123456
+ *                     plan_name:
+ *                       type: string
+ *                       example: Pro Monthly
+ *                     plan_status:
+ *                       type: string
+ *                       example: active
+ *                     amount:
+ *                       type: number
+ *                       format: decimal
+ *                       example: 29.99
+ *                     currency:
+ *                       type: string
+ *                       example: usd
+ *                     interval:
+ *                       type: string
+ *                       example: month
+ *       400:
+ *         description: Invalid request
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: Invalid plan ID
+ *       404:
+ *         description: User or active plan not found
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: Plan not found
+ *       500:
+ *         description: Internal server error
+ */
+/**
+ * @swagger
+ * /user/upgrade-plan:
+ *   post:
+ *     summary: Upgrade an active subscription plan
+ *     tags:
+ *       - User
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: newPlanId
+ *         required: true
+ *         description: ID of the new subscription plan
+ *         schema:
+ *           type: string
+ *           format: uuid
+ *           example: 550e8400-e29b-41d4-a716-446655440000
+ *     responses:
+ *       200:
+ *         description: Subscription upgraded successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: Subscription upgraded successfully
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     subscription_id:
+ *                       type: string
+ *                       example: sub_1NABC123XYZ
+ *                     previous_plan_id:
+ *                       type: string
+ *                       format: uuid
+ *                       example: 550e8400-e29b-41d4-a716-446655440000
+ *                     previous_plan_name:
+ *                       type: string
+ *                       example: Basic Plan
+ *                     plan_id:
+ *                       type: string
+ *                       format: uuid
+ *                       example: 660e8400-e29b-41d4-a716-446655440000
+ *                     plan_name:
+ *                       type: string
+ *                       example: Premium Plan
+ *                     status:
+ *                       type: string
+ *                       example: active
+ *                     valid_from:
+ *                       type: string
+ *                       format: date-time
+ *                       example: 2026-09-24T10:30:00.000Z
+ *                     valid_until:
+ *                       type: string
+ *                       format: date-time
+ *                       example: 2026-10-24T10:30:00.000Z
+ *       400:
+ *         description: Bad request
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   examples:
+ *                     missingPlan:
+ *                       value: New plan ID is required
+ *                     samePlan:
+ *                       value: User is already subscribed to this plan
+ *                     notUpgrade:
+ *                       value: Selected plan is not an upgrade
+ *                     missingSubscription:
+ *                       value: Stripe subscription not found
+ *                     invalidStatus:
+ *                       value: Subscription cannot be upgraded while status is past_due
+ *                     missingItem:
+ *                       value: Subscription item not found
+ *       404:
+ *         description: Resource not found
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   examples:
+ *                     subscription:
+ *                       value: Active subscription not found
+ *                     currentPlan:
+ *                       value: Current plan not found
+ *                     newPlan:
+ *                       value: New plan not found
+ *       500:
+ *         description: Internal server error
+ */
+/**
+ * @swagger
+ * /user/downgrade-plan:
+ *   post:
+ *     summary: Schedule subscription downgrade
+ *     description: Schedules a subscription downgrade to take effect after the current billing period ends.
+ *     tags:
+ *       - User
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - plan_id
+ *             properties:
+ *               plan_id:
+ *                 type: string
+ *                 format: uuid
+ *                 description: ID of the plan to downgrade to
+ *                 example: "550e8400-e29b-41d4-a716-446655440000"
+ *     responses:
+ *       200:
+ *         description: Subscription downgrade scheduled successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: Subscription downgrade scheduled successfully
+ *                 module:
+ *                   type: string
+ *                   example: Subscription
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     subscription:
+ *                       type: object
+ *                       properties:
+ *                         current_plan:
+ *                           type: string
+ *                           example: Elite
+ *                         pending_plan:
+ *                           type: string
+ *                           example: Plus
+ *                         current_period_end:
+ *                           type: string
+ *                           format: date-time
+ *                           example: "2026-10-30T10:30:00.000Z"
+ *                         stripe_schedule_id:
+ *                           type: string
+ *                           example: sub_sched_123456789
+ *       400:
+ *         description: Invalid request or downgrade cannot be scheduled
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: Selected plan is not a downgrade
+ *       401:
+ *         description: Unauthorized
+ *       404:
+ *         description: Active subscription or selected plan not found
+ *       500:
+ *         description: Internal server error
+ */
+/**
+ * @swagger
+ * /user/cancel-plan:
+ *   post:
+ *     summary: Cancel subscription at the end of the current billing period
+ *     description: Schedules the user's active subscription for cancellation at the end of the current billing period. The user retains access to the current plan until the billing period ends.
+ *     tags:
+ *       - User
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Subscription cancellation scheduled successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: Subscription cancellation scheduled successfully
+ *                 module:
+ *                   type: string
+ *                   example: Subscription
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     subscription:
+ *                       type: object
+ *                       properties:
+ *                         plan:
+ *                           type: string
+ *                           format: uuid
+ *                           example: 550e8400-e29b-41d4-a716-446655440000
+ *                         status:
+ *                           type: string
+ *                           example: active
+ *                         cancel_at_period_end:
+ *                           type: boolean
+ *                           example: true
+ *                         current_period_end:
+ *                           type: string
+ *                           format: date-time
+ *                           example: "2026-10-30T10:30:00.000Z"
+ *       400:
+ *         description: Subscription cancellation cannot be scheduled
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: Subscription is already scheduled for cancellation
+ *       401:
+ *         description: Unauthorized
+ *       404:
+ *         description: Active subscription not found
+ *       500:
+ *         description: Internal server error
+ */

@@ -19,6 +19,7 @@ const {
   getUsersSchema,
   getUserDetailsSchema,
   addOrganizerSchema,
+  addPlanSchema,
 } = require('../validation/admin.validation');
 const userRouter = require('./user.route');
 
@@ -96,6 +97,14 @@ adminRouter.get(
   authenticate,
   authorize(ROLES.SUPER_ADMIN),
   adminController.getUserDetails,
+);
+
+adminRouter.post(
+  '/plan',
+  validate(addPlanSchema),
+  authenticate,
+  authorize(ROLES.SUPER_ADMIN),
+  adminController.addPlan,
 );
 
 module.exports = adminRouter;

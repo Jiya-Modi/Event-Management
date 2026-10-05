@@ -1558,3 +1558,102 @@
  *                   type: string
  *                   example: Internal server error.
  */
+/**
+ * @swagger
+ * /admin/plan:
+ *   post:
+ *     summary: Create a subscription plan
+ *     tags:
+ *       - Admin
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - name
+ *               - interval
+ *               - amount
+ *               - currency
+ *               - price_id
+ *             properties:
+ *               name:
+ *                 type: string
+ *                 example: Pro Monthly
+ *               interval:
+ *                 type: string
+ *                 enum:
+ *                   - month
+ *                   - year
+ *                 example: month
+ *               amount:
+ *                 type: number
+ *                 format: decimal
+ *                 example: 29.99
+ *               currency:
+ *                 type: string
+ *                 example: usd
+ *               price_id:
+ *                 type: string
+ *                 example: price_1ABC123XYZ
+ *     responses:
+ *       201:
+ *         description: Plan created successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: Plan created successfully
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     plan:
+ *                       type: object
+ *                       properties:
+ *                         id:
+ *                           type: string
+ *                           format: uuid
+ *                           example: 550e8400-e29b-41d4-a716-446655440000
+ *                         name:
+ *                           type: string
+ *                           example: Pro Monthly
+ *                         interval:
+ *                           type: string
+ *                           example: month
+ *                         amount:
+ *                           type: number
+ *                           format: decimal
+ *                           example: 29.99
+ *                         currency:
+ *                           type: string
+ *                           example: usd
+ *                         price_id:
+ *                           type: string
+ *                           example: price_1ABC123XYZ
+ *                         created_at:
+ *                           type: string
+ *                           format: date-time
+ *                           example: 2026-09-25T05:30:00.000Z
+ *       400:
+ *         description: Plan with this price already exists
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: Plan with this price already exists
+ *       500:
+ *         description: Internal server error
+ */

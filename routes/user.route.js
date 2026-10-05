@@ -15,6 +15,9 @@ const {
   destroyUserSchema,
   editUserProfileSchema,
   addFeedbackSchema,
+  subscribePlanSchema,
+  upgradePlanSchema,
+  downgradePlanSchema,
 } = require('../validation/user.validation');
 
 userRouter.post(
@@ -61,6 +64,37 @@ userRouter.delete(
   authenticate,
   authorize(ROLES.USER),
   userController.cancelRegistration,
+);
+
+userRouter.post(
+  '/subscribe-plan',
+  validate(subscribePlanSchema),
+  authenticate,
+  authorize(ROLES.USER),
+  userController.subscribePlan,
+);
+
+userRouter.post(
+  '/upgrade-plan',
+  validate(upgradePlanSchema),
+  authenticate,
+  authorize(ROLES.USER),
+  userController.upgradePlan,
+);
+
+userRouter.post(
+  '/downgrade-plan',
+  validate(downgradePlanSchema),
+  authenticate,
+  authorize(ROLES.USER),
+  userController.downgradePlan,
+);
+
+userRouter.post(
+  '/cancel-plan',
+  authenticate,
+  authorize(ROLES.USER),
+  userController.cancelSubscription,
 );
 
 module.exports = userRouter;

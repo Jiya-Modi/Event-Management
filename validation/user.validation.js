@@ -37,10 +37,37 @@ const addFeedbackSchema = Joi.object({
   rating: Joi.number().required().valid(1, 2, 3, 4, 5),
 });
 
+const subscribePlanSchema = Joi.object({
+  plan_id: Joi.string()
+    .guid({
+      version: ['uuidv4'],
+    })
+    .required(),
+});
+
+const upgradePlanSchema = Joi.object({
+  newPlanId: Joi.string()
+    .guid({
+      version: ['uuidv4'],
+    })
+    .required(),
+});
+
+const downgradePlanSchema = Joi.object({
+  plan_id: Joi.string()
+    .guid({
+      version: ['uuidv4'],
+    })
+    .required(),
+});
+
 module.exports = {
   registerEventSchema,
   checkInSchema,
   cancelRegisterSchema,
   editUserProfileSchema,
   addFeedbackSchema,
+  subscribePlanSchema,
+  upgradePlanSchema,
+  downgradePlanSchema,
 };

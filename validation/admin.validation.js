@@ -191,6 +191,23 @@ const addOrganizerSchema = Joi.object({
   organization_name: Joi.string().trim().min(3).max(150).required(),
 });
 
+const addPlanSchema = Joi.object({
+  name: Joi.string()
+    .trim()
+    .min(3)
+    .max(100)
+    .pattern(/^[A-Za-z ]+$/)
+    .required(),
+
+  interval: Joi.string().trim().min(3).max(100).required(),
+
+  currency: Joi.string().trim().min(3).max(100).required(),
+
+  amount: Joi.number().min(1).required(),
+
+  price_id: Joi.string().trim().min(3).max(100).required(),
+});
+
 module.exports = {
   destroyUserSchema,
   getEventDetailsSchema,
@@ -200,4 +217,5 @@ module.exports = {
   getUsersSchema,
   getUserDetailsSchema,
   addOrganizerSchema,
+  addPlanSchema,
 };

@@ -11,6 +11,8 @@ const {
   EventCategory,
   Feedback,
   PartialRegistration,
+  Plan,
+  UserPlan,
 } = require('../models');
 
 const {
@@ -23,6 +25,7 @@ const {
   PARTIAL_REGISTRATION_STATUS,
   AUDIT_ACTIONS,
   AUDIT_MODULES,
+  SUBSCRIPTION_STATUS,
 } = require('../common/constants');
 const Messages = require('../common/messages');
 
@@ -2201,6 +2204,497 @@ const getEvents = async (query) => {
   }
 };
 
+const subscribePlan = async (userId, query) => {
+  const transaction = await sequelize.transaction();
+
+  try {
+    const { plan_id } = query;
+
+    const user = await User.findOne({
+      where: {
+        id: userId,
+      },
+      attributes: [
+        'id',
+        'name',
+        [
+          sequelize.fn(
+            'pgp_sym_decrypt',
+            sequelize.col('email'),
+            process.env.ENCRYPTION_KEY,
+          ),
+          'email',
+        ],
+        'stripe_customer_id',
+      ],
+      transaction,
+    });
+
+    if (!user) {
+      const error = new Error(getMessage(Messages.NOT_FOUND, MODULES.USER));
+      error.statusCode = STATUS_CODES.NOT_FOUND;
+      throw error;
+    }
+
+    const plan = await Plan.findOne({
+      where: {
+        id: plan_id,
+        status: 'active',
+      },
+      attributes: [
+        'id',
+        'name',
+        'interval',
+        'amount',
+        'currency',
+        'status',
+        'price_id',
+      ],
+      transaction,
+    });
+
+    if (!plan) {
+      const error = new Error(getMessage(Messages.NOT_FOUND, MODULES.PLAN));
+      error.statusCode = STATUS_CODES.NOT_FOUND;
+      throw error;
+    }
+
+    const existingUserPlan = await UserPlan.findOne({
+      where: {
+        user_id: userId,
+        status: 'active',
+      },
+      transaction,
+    });
+
+    if (existingUserPlan) {
+      const error = new Error('User already has an active subscription');
+      error.statusCode = STATUS_CODES.BAD_REQUEST;
+      throw error;
+    }
+
+    let customer;
+
+    if (user.stripe_customer_id) {
+      try {
+        customer = await stripe.customers.retrieve(user.stripe_customer_id);
+
+        if (customer.deleted) {
+          customer = null;
+        }
+      } catch (err) {
+        if (err.code === 'resource_missing') {
+          customer = null;
+        } else {
+          throw err;
+        }
+      }
+    }
+
+    if (!customer) {
+      customer = await stripe.customers.create(
+        {
+          name: user.name,
+          email: user.email,
+          metadata: {
+            user_id: userId,
+          },
+        },
+        {
+          idempotencyKey: `customer-${userId}`,
+        },
+      );
+
+      await user.update(
+        {
+          stripe_customer_id: customer.id,
+        },
+        {
+          transaction,
+        },
+      );
+    }
+
+    const session = await stripe.checkout.sessions.create(
+      {
+        mode: 'subscription',
+        customer: customer.id,
+        line_items: [
+          {
+            price: plan.price_id,
+            quantity: 1,
+          },
+        ],
+        success_url:
+          'http://localhost:3000/subscription/success?session_id={CHECKOUT_SESSION_ID}',
+        cancel_url: 'http://localhost:3000/subscription/cancel',
+        metadata: {
+          user_id: userId,
+          plan_id: plan.id,
+        },
+        subscription_data: {
+          metadata: {
+            user_id: userId,
+            plan_id: plan.id,
+          },
+        },
+      },
+      {
+        idempotencyKey: `checkout-${userId}-${plan.id}`,
+      },
+    );
+
+    await transaction.commit();
+
+    return {
+      message: 'Checkout session created.',
+      data: {
+        user_id: userId,
+        checkout_session_id: session.id,
+        checkout_url: session.url,
+        plan_id: plan.id,
+        plan_name: plan.name,
+        plan_status: plan.status,
+        amount: plan.amount,
+        currency: plan.currency,
+        interval: plan.interval,
+      },
+    };
+  } catch (err) {
+    await transaction.rollback();
+    throw err;
+  }
+};
+
+const upgradePlan = async (userId, query) => {
+  const transaction = await sequelize.transaction();
+
+  try {
+    const { newPlanId } = query;
+
+    if (!newPlanId) {
+      const error = new Error('New plan ID is required');
+      error.statusCode = STATUS_CODES.BAD_REQUEST;
+      throw error;
+    }
+
+    const userPlan = await UserPlan.findOne({
+      where: {
+        user_id: userId,
+        status: 'active',
+      },
+      transaction,
+    });
+
+    if (!userPlan) {
+      const error = new Error('Active subscription not found');
+      error.statusCode = STATUS_CODES.NOT_FOUND;
+      throw error;
+    }
+
+    const currentPlan = await Plan.findOne({
+      where: {
+        id: userPlan.plan_id,
+      },
+      transaction,
+    });
+
+    if (!currentPlan) {
+      const error = new Error('Current plan not found');
+      error.statusCode = STATUS_CODES.NOT_FOUND;
+      throw error;
+    }
+
+    const newPlan = await Plan.findOne({
+      where: {
+        id: newPlanId,
+        status: 'active',
+      },
+      transaction,
+    });
+
+    if (!newPlan) {
+      const error = new Error('New plan not found');
+      error.statusCode = STATUS_CODES.NOT_FOUND;
+      throw error;
+    }
+
+    if (currentPlan.id === newPlan.id) {
+      const error = new Error('User is already subscribed to this plan');
+      error.statusCode = STATUS_CODES.BAD_REQUEST;
+      throw error;
+    }
+
+    if (Number(newPlan.amount) <= Number(currentPlan.amount)) {
+      const error = new Error('Selected plan is not an upgrade');
+      error.statusCode = STATUS_CODES.BAD_REQUEST;
+      throw error;
+    }
+
+    if (!userPlan.subscription_id) {
+      const error = new Error('Stripe subscription not found');
+      error.statusCode = STATUS_CODES.BAD_REQUEST;
+      throw error;
+    }
+
+    const subscription = await stripe.subscriptions.retrieve(
+      userPlan.subscription_id,
+    );
+
+    if (subscription.status !== 'active') {
+      const error = new Error(
+        `Subscription cannot be upgraded while status is ${subscription.status}`,
+      );
+      error.statusCode = STATUS_CODES.BAD_REQUEST;
+      throw error;
+    }
+
+    const subscriptionItem = subscription.items?.data?.[0];
+
+    if (!subscriptionItem) {
+      const error = new Error('Subscription item not found');
+      error.statusCode = STATUS_CODES.BAD_REQUEST;
+      throw error;
+    }
+
+    if (subscriptionItem.price?.id === newPlan.price_id) {
+      const error = new Error('User is already subscribed to this plan');
+      error.statusCode = STATUS_CODES.BAD_REQUEST;
+      throw error;
+    }
+
+    const updatedSubscription = await stripe.subscriptions.update(
+      subscription.id,
+      {
+        items: [
+          {
+            id: subscriptionItem.id,
+            price: newPlan.price_id,
+          },
+        ],
+        proration_behavior: 'always_invoice',
+        payment_behavior: 'error_if_incomplete',
+        metadata: {
+          user_id: userId,
+          plan_id: newPlan.id,
+          payment_type: 'subscription',
+        },
+      },
+    );
+
+    const updatedItem = updatedSubscription.items?.data?.[0];
+
+    await transaction.commit();
+
+    return {
+      message: 'Subscription upgraded successfully',
+      data: {
+        subscription_id: updatedSubscription.id,
+        previous_plan_id: currentPlan.id,
+        previous_plan_name: currentPlan.name,
+        plan_id: newPlan.id,
+        plan_name: newPlan.name,
+        status: updatedSubscription.status,
+        valid_from: updatedItem?.current_period_start
+          ? new Date(updatedItem.current_period_start * 1000)
+          : null,
+        valid_until: updatedItem?.current_period_end
+          ? new Date(updatedItem.current_period_end * 1000)
+          : null,
+      },
+    };
+  } catch (error) {
+    await transaction.rollback();
+    throw error;
+  }
+};
+
+const scheduleDowngrade = async (userId, body) => {
+  const transaction = await sequelize.transaction();
+
+  try {
+    const { plan_id } = body;
+
+    const userPlan = await UserPlan.findOne({
+      where: {
+        user_id: userId,
+        status: 'active',
+      },
+      transaction,
+    });
+
+    if (!userPlan) {
+      throw new Error('Active subscription not found');
+    }
+
+    if (userPlan.pending_plan_id) {
+      throw new Error('A plan change is already scheduled');
+    }
+
+    const currentPlan = await Plan.findByPk(userPlan.plan_id, {
+      transaction,
+    });
+
+    if (!currentPlan) {
+      throw new Error('Current plan not found');
+    }
+
+    const newPlan = await Plan.findByPk(plan_id, {
+      transaction,
+    });
+
+    if (!newPlan) {
+      throw new Error('Selected plan not found');
+    }
+
+    if (currentPlan.id === newPlan.id) {
+      throw new Error('You are already subscribed to this plan');
+    }
+
+    if (Number(newPlan.amount) >= Number(currentPlan.amount)) {
+      throw new Error('Selected plan is not a downgrade');
+    }
+
+    const subscription = await stripe.subscriptions.retrieve(
+      userPlan.subscription_id,
+    );
+
+    if (subscription.status !== 'active') {
+      throw new Error('Stripe subscription is not active');
+    }
+
+    const subscriptionItem = subscription.items?.data?.[0];
+
+    if (!subscriptionItem) {
+      throw new Error('Subscription item not found');
+    }
+
+    const schedule = await stripe.subscriptionSchedules.create({
+      from_subscription: subscription.id,
+    });
+
+    const scheduleDetails = await stripe.subscriptionSchedules.retrieve(
+      schedule.id,
+    );
+
+    const currentPhase = scheduleDetails.phases?.[0];
+
+    if (!currentPhase) {
+      throw new Error('Current subscription schedule phase not found');
+    }
+
+    await stripe.subscriptionSchedules.update(schedule.id, {
+      end_behavior: 'release',
+      phases: [
+        {
+          start_date: currentPhase.start_date,
+          end_date: subscriptionItem.current_period_end,
+          items: [
+            {
+              price: currentPlan.price_id,
+              quantity: 1,
+            },
+          ],
+        },
+        {
+          start_date: subscriptionItem.current_period_end,
+          items: [
+            {
+              price: newPlan.price_id,
+              quantity: 1,
+            },
+          ],
+        },
+      ],
+    });
+    await userPlan.update(
+      {
+        pending_plan_id: newPlan.id,
+        stripe_schedule_id: schedule.id,
+      },
+      {
+        transaction,
+      },
+    );
+
+    await transaction.commit();
+
+    return {
+      subscription: {
+        current_plan: currentPlan.name,
+        pending_plan: newPlan.name,
+        current_period_end: new Date(subscription.current_period_end * 1000),
+        stripe_schedule_id: schedule.id,
+      },
+    };
+  } catch (err) {
+    await transaction.rollback();
+    throw err;
+  }
+};
+
+const cancelSubscription = async (userId) => {
+  const transaction = await sequelize.transaction();
+
+  try {
+    const userPlan = await UserPlan.findOne({
+      where: {
+        user_id: userId,
+        status: 'active',
+      },
+      transaction,
+    });
+
+    if (!userPlan) {
+      throw new Error('Active subscription not found');
+    }
+
+    if (userPlan.cancel_at_period_end) {
+      throw new Error('Subscription is already scheduled for cancellation');
+    }
+
+    const subscription = await stripe.subscriptions.retrieve(
+      userPlan.subscription_id,
+    );
+
+    if (subscription.status !== 'active') {
+      throw new Error('Stripe subscription cannot be cancelled');
+    }
+
+    const updatedSubscription = await stripe.subscriptions.update(
+      userPlan.subscription_id,
+      {
+        cancel_at_period_end: true,
+      },
+    );
+
+    await userPlan.update(
+      {
+        status: SUBSCRIPTION_STATUS.CANCEL_SCHEDULED,
+      },
+      {
+        transaction,
+      },
+    );
+
+    await transaction.commit();
+
+    return {
+      subscription: {
+        plan: userPlan.plan_id,
+        status: userPlan.status,
+        cancel_at_period_end: updatedSubscription.cancel_at_period_end,
+        current_period_end: new Date(
+          updatedSubscription.current_period_end * 1000,
+        ),
+      },
+    };
+  } catch (err) {
+    await transaction.rollback();
+    throw err;
+  }
+};
+
 module.exports = {
   registerEventTicket,
   checkIn,
@@ -2212,6 +2706,10 @@ module.exports = {
   getEvents,
   getEventDetails,
   payTicket,
+  subscribePlan,
+  upgradePlan,
+  scheduleDowngrade,
+  cancelSubscription,
 };
 
 //Registration closed date - 24hours before start date
@@ -2225,3 +2723,5 @@ module.exports = {
 
 //stripe.checkout.sessions.create() -> for checkout session
 //stripe.refunds.create()-> to initiate refund process
+
+//getpricingPlan

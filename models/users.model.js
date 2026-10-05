@@ -39,6 +39,16 @@ module.exports = (sequelize, DataTypes) => {
         foreignKey: 'user_id',
         as: 'payment_transactions',
       });
+
+      User.hasMany(models.UserPlan, {
+        foreignKey: 'customer_id',
+        as: 'stripeuser',
+      });
+
+      User.hasMany(models.UserPlan, {
+        foreignKey: 'user_id',
+        as: 'user',
+      });
     }
   }
 
@@ -94,6 +104,12 @@ module.exports = (sequelize, DataTypes) => {
       filename: {
         type: DataTypes.STRING(255),
         allowNull: true,
+      },
+
+      stripe_customer_id: {
+        type: DataTypes.STRING(255),
+        allowNull: true,
+        unique: true,
       },
     },
     {

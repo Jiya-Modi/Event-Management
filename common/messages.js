@@ -51,6 +51,11 @@ module.exports = {
   WAITLIST_LIMIT_REACHED: 'Waitlist limit has been reached.',
   REGISTRATION_CANCELLED: 'Successfully cancelled registration for the event.',
 
+  SUBSCRIBE_SUCCESS: 'Successfully subscribe the plan',
+  SUBSCRIBE_UPGRADE: 'Plan upgraded successfully',
+  SUBSCRIBE_DOWNGRADE: 'Subscription downgrade scheduled successfully',
+  SUBSCRIBE_CANCELED: 'Subscription cancellation scheduled successfully',
+
   PAYMENT_ALREADY_COMPLETED: 'Payment has already been completed.',
   PAYMENT_SUCCESS: 'Payment Success',
 
